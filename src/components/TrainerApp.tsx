@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  Ban,
   BookMarked,
   BookOpenCheck,
   Bookmark,
@@ -10,10 +11,13 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Copy,
   Download,
+  Eraser,
   FileWarning,
   Gauge,
   History,
+  Highlighter,
   Import,
   KeyRound,
   LayoutDashboard,
@@ -133,6 +137,69 @@ function formatPercent(value: number) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function renderHighlightedText(
+  text: string,
+  highlights: string[],
+  onHighlightToken?: (token: string) => void
+) {
+  const activeHighlights = sortUnique(highlights.map((highlight) => highlight.trim()))
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+
+  if (!activeHighlights.length && !onHighlightToken) {
+    return text;
+  }
+
+  const parts = activeHighlights.length
+    ? text.split(new RegExp(`(${activeHighlights.map(escapeRegExp).join("|")})`, "gi"))
+    : [text];
+
+  return parts.map((part, index) => {
+    const highlighted = activeHighlights.some(
+      (highlight) => highlight.toLowerCase() === part.toLowerCase()
+    );
+
+    return highlighted ? (
+      <mark className="bg-[#f1d77a] text-text" key={`${part}-${index}`}>
+        {part}
+      </mark>
+    ) : onHighlightToken ? (
+      <span key={`${part}-${index}`}>
+        {part.split(/(\s+)/).map((token, tokenIndex) =>
+          token.trim() ? (
+            <span
+              className="cursor-text rounded-sm hover:bg-[#f1d77a]/45"
+              key={`${token}-${tokenIndex}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onHighlightToken(token);
+              }}
+            >
+              {token}
+            </span>
+          ) : (
+            token
+          )
+        )}
+      </span>
+    ) : (
+      part
+    );
+  });
+}
+
+function questionClipboardText(question: Question) {
+  const choices = question.choices
+    .map((choice, index) => `${index + 1}. ${choice.text}`)
+    .join("\n");
+
+  return [question.stem.trim(), choices].filter(Boolean).join("\n\n");
 }
 
 function shuffleItems<T>(items: T[]) {
@@ -338,6 +405,12 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   const [activeSessionLogId, setActiveSessionLogId] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [examAnswers, setExamAnswers] = useState<Record<string, string>>({});
+  const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
+  const [excludedChoices, setExcludedChoices] = useState<Record<string, string[]>>({});
+  const [questionHighlights, setQuestionHighlights] = useState<Record<string, string[]>>(
+    {}
+  );
+  const [highlightMode, setHighlightMode] = useState(false);
   const [examFinished, setExamFinished] = useState(false);
   const [studyFinished, setStudyFinished] = useState(false);
   const [sessionStartedAt, setSessionStartedAt] = useState(now());
@@ -355,6 +428,12 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   const [reportOpen, setReportOpen] = useState(false);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stemRef = useRef<HTMLDivElement>(null);
+  const questionContentRef = useRef<HTMLElement>(null);
+  const lastChoiceKeyRef = useRef<{
+    questionId: string;
+    choiceId: string;
+    at: number;
+  } | null>(null);
 
   const questionById = useMemo(
     () => new Map(questions.map((question) => [question.id, question])),
@@ -705,6 +784,167 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       .catch(() => undefined);
   }
 
+  function goToNextQuestion() {
+    setActiveIndex((current) => Math.min(sessionQuestions.length - 1, current + 1));
+  }
+
+  function selectedChoiceFor(question: Question) {
+    if (mode === "exam" && !examFinished) {
+      return draftAnswers[question.id] || examAnswers[question.id];
+    }
+
+    return progress.answers[question.id]?.selected || draftAnswers[question.id];
+  }
+
+  function isChoiceExcluded(questionId: string, choiceId: string) {
+    return excludedChoices[questionId]?.includes(choiceId) || false;
+  }
+
+  function selectChoice(question: Question, choiceId: string) {
+    if (
+      question.kind === "freeText" ||
+      isChoiceExcluded(question.id, choiceId) ||
+      (mode !== "exam" && Boolean(progress.answers[question.id]))
+    ) {
+      return;
+    }
+
+    setDraftAnswers((current) => ({ ...current, [question.id]: choiceId }));
+  }
+
+  function submitChoice(question: Question, choiceId?: string) {
+    if (question.kind === "freeText") {
+      if (progress.answers[question.id]) {
+        goToNextQuestion();
+      } else {
+        revealFreeText(question);
+      }
+      return;
+    }
+
+    if (mode !== "exam" && progress.answers[question.id]) {
+      goToNextQuestion();
+      return;
+    }
+
+    const selected = choiceId || selectedChoiceFor(question);
+
+    if (!selected || isChoiceExcluded(question.id, selected)) {
+      return;
+    }
+
+    if (
+      mode === "exam" &&
+      !examFinished &&
+      examAnswers[question.id] === selected &&
+      !choiceId
+    ) {
+      goToNextQuestion();
+      return;
+    }
+
+    if (mode === "exam" && !examFinished) {
+      setExamAnswers((current) => ({ ...current, [question.id]: selected }));
+    } else {
+      recordAnswer(question, selected);
+    }
+  }
+
+  function toggleExcludedChoice(question: Question, choiceId: string) {
+    if (mode !== "exam" && progress.answers[question.id]) {
+      return;
+    }
+
+    setExcludedChoices((current) => {
+      const choices = new Set(current[question.id] || []);
+
+      if (choices.has(choiceId)) {
+        choices.delete(choiceId);
+      } else {
+        choices.add(choiceId);
+      }
+
+      return { ...current, [question.id]: Array.from(choices) };
+    });
+
+    if (selectedChoiceFor(question) === choiceId) {
+      setDraftAnswers((current) => {
+        const { [question.id]: _removed, ...remaining } = current;
+        return remaining;
+      });
+
+      if (mode === "exam" && !examFinished) {
+        setExamAnswers((current) => {
+          const { [question.id]: _removed, ...remaining } = current;
+          return remaining;
+        });
+      }
+    }
+  }
+
+  function captureHighlight(questionId: string) {
+    if (!highlightMode) {
+      return;
+    }
+
+    const selection = window.getSelection();
+    const root = questionContentRef.current;
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const selectedText = selection?.toString().replace(/\s+/g, " ").trim() || "";
+
+    if (!root || !range || !root.contains(range.commonAncestorContainer) || !selectedText) {
+      return;
+    }
+
+    setQuestionHighlights((current) => ({
+      ...current,
+      [questionId]: Array.from(new Set([...(current[questionId] || []), selectedText]))
+    }));
+    selection?.removeAllRanges();
+  }
+
+  function highlightToken(questionId: string, token: string) {
+    const selectedText = token.replace(
+      /^[.,;:!?()[\]{}"'„“‚’]+|[.,;:!?()[\]{}"'„“‚’]+$/g,
+      ""
+    );
+
+    if (!selectedText) {
+      return;
+    }
+
+    setQuestionHighlights((current) => ({
+      ...current,
+      [questionId]: Array.from(new Set([...(current[questionId] || []), selectedText]))
+    }));
+  }
+
+  function clearQuestionHighlights(questionId: string) {
+    setQuestionHighlights((current) => {
+      const { [questionId]: _removed, ...remaining } = current;
+      return remaining;
+    });
+  }
+
+  async function copyQuestion(question: Question) {
+    const text = questionClipboardText(question);
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+
+    setNotice("Frage und Antworten kopiert");
+  }
+
   useEffect(() => {
     if (!navOpen) {
       return;
@@ -727,6 +967,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
 
   useEffect(() => {
     setReportOpen(false);
+    lastChoiceKeyRef.current = null;
 
     if (view === "trainer" && sessionIds.length) {
       stemRef.current?.scrollIntoView({ block: "start" });
@@ -743,7 +984,12 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
 
-      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) {
+      if (
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+      ) {
         return;
       }
 
@@ -751,7 +997,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
 
       if (key === "arrowright" || key === "n") {
         event.preventDefault();
-        setActiveIndex((current) => Math.min(sessionQuestions.length - 1, current + 1));
+        goToNextQuestion();
         return;
       }
 
@@ -764,34 +1010,59 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       if (question.kind === "freeText") {
         if (key === "enter" || key === " ") {
           event.preventDefault();
-
-          if (!progress.answers[question.id]) {
-            revealFreeText(question);
-          }
+          submitChoice(question);
         }
 
         return;
       }
 
-      const numberIndex = "123456".indexOf(event.key);
-      const letterIndex = "abcdef".indexOf(key);
-      const index = numberIndex !== -1 ? numberIndex : letterIndex;
+      if (key === "enter" || key === " ") {
+        event.preventDefault();
+        submitChoice(question);
+        return;
+      }
+
+      const exclusionIndex = "qwert".indexOf(key);
+
+      if (exclusionIndex !== -1 && exclusionIndex < question.choices.length) {
+        event.preventDefault();
+        toggleExcludedChoice(question, question.choices[exclusionIndex].id);
+        return;
+      }
+
+      const index = "12345".indexOf(event.key);
 
       if (index === -1 || index >= question.choices.length) {
         return;
       }
 
-      const storedAnswer = progress.answers[question.id];
-      const currentSelected =
-        mode === "exam" && !examFinished ? examAnswers[question.id] : storedAnswer?.selected;
-      const locked = mode !== "exam" && Boolean(currentSelected);
+      const choiceId = question.choices[index].id;
 
-      if (locked) {
+      if (isChoiceExcluded(question.id, choiceId)) {
         return;
       }
 
       event.preventDefault();
-      answerQuestion(question, question.choices[index].id);
+      selectChoice(question, choiceId);
+
+      const previous = lastChoiceKeyRef.current;
+      const pressedAt = Date.now();
+
+      if (
+        !event.repeat &&
+        previous?.questionId === question.id &&
+        previous.choiceId === choiceId &&
+        pressedAt - previous.at <= 400
+      ) {
+        submitChoice(question, choiceId);
+        lastChoiceKeyRef.current = null;
+      } else {
+        lastChoiceKeyRef.current = {
+          questionId: question.id,
+          choiceId,
+          at: pressedAt
+        };
+      }
     }
 
     window.addEventListener("keydown", onKeyDown);
@@ -799,8 +1070,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     activeQuestion,
+    draftAnswers,
     examAnswers,
     examFinished,
+    excludedChoices,
     mode,
     progress.answers,
     queueOpen,
@@ -819,6 +1092,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     setActiveSessionLogId(null);
     setActiveIndex(0);
     setExamAnswers({});
+    setDraftAnswers({});
+    setExcludedChoices({});
+    setQuestionHighlights({});
+    setHighlightMode(false);
     setExamFinished(false);
     setStudyFinished(false);
     setQueueOpen(false);
@@ -899,6 +1176,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     setSessionIds(ids);
     setActiveIndex(0);
     setExamAnswers({});
+    setDraftAnswers({});
+    setExcludedChoices({});
+    setQuestionHighlights({});
+    setHighlightMode(false);
     setExamFinished(false);
     setStudyFinished(false);
     setSessionStartedAt(startedAt);
@@ -1106,18 +1387,6 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     };
   }
 
-  function answerQuestion(question: Question, selected: string) {
-    if (mode === "exam" && !examFinished) {
-      setExamAnswers((current) => ({
-        ...current,
-        [question.id]: selected
-      }));
-      return;
-    }
-
-    recordAnswer(question, selected);
-  }
-
   function finishExam() {
     const answeredIds = Object.keys(examAnswers);
     const correct = answeredIds.filter(
@@ -1273,6 +1542,15 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     if (!activeQuestion) {
       return;
     }
+
+    setDraftAnswers((current) => {
+      const { [activeQuestion.id]: _removed, ...remaining } = current;
+      return remaining;
+    });
+    setExcludedChoices((current) => {
+      const { [activeQuestion.id]: _removed, ...remaining } = current;
+      return remaining;
+    });
 
     patchProgress((current) => {
       const { [activeQuestion.id]: _removed, ...answers } = current.answers;
@@ -1786,6 +2064,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     setSessionIds(ids);
     setActiveIndex(firstUnanswered === -1 ? 0 : firstUnanswered);
     setExamAnswers({});
+    setDraftAnswers({});
+    setExcludedChoices({});
+    setQuestionHighlights({});
+    setHighlightMode(false);
     setExamFinished(false);
     setStudyFinished(false);
     setSessionStartedAt(session.startedAt);
@@ -2049,18 +2331,81 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     );
   }
 
+  function renderQuestionActions(question: Question, isBookmarked: boolean) {
+    const hasHighlights = Boolean(questionHighlights[question.id]?.length);
+
+    return (
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+        <Button
+          aria-label="Frage kopieren"
+          className="min-h-[44px] min-w-[44px] px-3"
+          onClick={() => void copyQuestion(question)}
+          title="Frage kopieren"
+          variant="ghost"
+        >
+          <Copy size={18} aria-hidden="true" />
+          <span className="hidden sm:inline">Kopieren</span>
+        </Button>
+        <Button
+          aria-label="Textmarker"
+          aria-pressed={highlightMode}
+          className="min-h-[44px] min-w-[44px] px-3"
+          onClick={() => setHighlightMode((current) => !current)}
+          title="Textmarker"
+          variant={highlightMode ? "secondary" : "ghost"}
+        >
+          <Highlighter size={18} aria-hidden="true" />
+          <span className="hidden sm:inline">Markieren</span>
+        </Button>
+        {hasHighlights ? (
+          <Button
+            aria-label="Markierungen löschen"
+            className="min-h-[44px] min-w-[44px] px-2"
+            onClick={() => clearQuestionHighlights(question.id)}
+            title="Markierungen löschen"
+            variant="ghost"
+          >
+            <Eraser size={18} aria-hidden="true" />
+          </Button>
+        ) : null}
+        <Button
+          aria-label={isBookmarked ? "Lesezeichen entfernen" : "Lesezeichen setzen"}
+          className="min-h-[44px] min-w-[44px] px-2"
+          onClick={() => toggleBookmark(question.id)}
+          title={isBookmarked ? "Lesezeichen entfernen" : "Lesezeichen setzen"}
+          variant="ghost"
+        >
+          {isBookmarked ? (
+            <BookmarkCheck size={18} aria-hidden="true" />
+          ) : (
+            <Bookmark size={18} aria-hidden="true" />
+          )}
+        </Button>
+        <Button
+          aria-label="Frage melden"
+          className="min-h-[44px] min-w-[44px] px-2"
+          onClick={() => setReportOpen((current) => !current)}
+          title="Frage melden"
+          variant="ghost"
+        >
+          <FileWarning size={18} aria-hidden="true" />
+        </Button>
+      </div>
+    );
+  }
+
   function renderQuestion(question: Question) {
     if (question.kind === "freeText") {
       return renderFreeTextQuestion(question);
     }
 
     const storedAnswer = progress.answers[question.id];
-    const currentSelected =
-      mode === "exam" && !examFinished ? examAnswers[question.id] : storedAnswer?.selected;
-    const revealed = mode === "exam" ? examFinished : Boolean(currentSelected);
-    const locked = mode !== "exam" && Boolean(currentSelected);
+    const currentSelected = selectedChoiceFor(question);
+    const revealed = mode === "exam" ? examFinished : Boolean(storedAnswer);
+    const locked = mode !== "exam" && Boolean(storedAnswer);
     const image = proxiedImage(question.imageUrl);
     const isBookmarked = bookmarkedIds.has(question.id);
+    const highlights = questionHighlights[question.id] || [];
     const isCorrect = currentSelected === question.answer;
     const stats = question.stats;
     const statTotal = stats
@@ -2073,39 +2418,26 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       stats && statTotal ? Math.round((stats.correct / statTotal) * 100) : null;
 
     return (
-      <article className="grid gap-5">
-        <div className="flex items-start justify-between gap-4">
+      <article
+        className="grid gap-5"
+        onMouseUp={() => captureHighlight(question.id)}
+        ref={questionContentRef}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="grid min-w-0 gap-1">
             <span className="text-label text-text-subtle">{question.subject}</span>
             <strong className="text-body font-medium">{question.topic}</strong>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              className="px-3"
-              onClick={() => toggleBookmark(question.id)}
-              variant="ghost"
-            >
-              {isBookmarked ? (
-                <BookmarkCheck size={18} aria-hidden="true" />
-              ) : (
-                <Bookmark size={18} aria-hidden="true" />
-              )}
-              <span>{isBookmarked ? "Gespeichert" : "Speichern"}</span>
-            </Button>
-            <Button
-              className="px-3"
-              onClick={() => setReportOpen((current) => !current)}
-              variant="ghost"
-            >
-              <FileWarning size={18} aria-hidden="true" />
-              <span>Melden</span>
-            </Button>
-          </div>
+          {renderQuestionActions(question, isBookmarked)}
         </div>
 
         <div className="grid gap-4" ref={stemRef}>
           <p className="m-0 whitespace-pre-line text-body leading-relaxed text-text">
-            {question.stem}
+            {renderHighlightedText(
+              question.stem,
+              highlights,
+              highlightMode ? (token) => highlightToken(question.id, token) : undefined
+            )}
           </p>
           {image ? (
             <img alt="" className="max-h-96 rounded border border-border" loading="lazy" src={image} />
@@ -2116,13 +2448,15 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           {question.choices.map((choice) => {
             const selected = currentSelected === choice.id;
             const correct = question.answer === choice.id;
+            const excluded = isChoiceExcluded(question.id, choice.id);
 
             return (
-              <button
+              <div
                 className={cn(
-                  "flex w-full items-center gap-3 rounded border border-border bg-surface px-4 py-3 text-left text-body transition-colors",
-                  !locked && "hover:bg-surface-muted",
+                  "flex w-full items-stretch rounded border border-border bg-surface transition-colors",
+                  !locked && !excluded && "hover:bg-surface-muted",
                   locked && !selected && "cursor-default opacity-70",
+                  excluded && "bg-surface-muted text-text-subtle",
                   selected && !revealed && "border-accent",
                   revealed &&
                     correct &&
@@ -2132,30 +2466,81 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                     !correct &&
                     "border-danger bg-[color-mix(in_srgb,var(--danger)_10%,var(--surface))]"
                 )}
-                disabled={locked}
                 key={choice.id}
-                onClick={() => answerQuestion(question, choice.id)}
-                type="button"
               >
-                <span className="w-5 shrink-0 font-medium text-text-muted">
-                  {choice.id}
-                </span>
-                <span className="min-w-0 flex-1">{choice.text}</span>
-                {revealed && statTotal ? (
-                  <span className="shrink-0 tabular-nums text-body-sm text-text-subtle">
-                    {Math.round(((statByChoice.get(choice.id) || 0) / statTotal) * 100)}%
+                <button
+                  aria-pressed={selected}
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left text-body",
+                    highlightMode && "cursor-text select-text"
+                  )}
+                  disabled={locked || excluded}
+                  onClick={() => {
+                    if (!highlightMode) {
+                      selectChoice(question, choice.id);
+                    }
+                  }}
+                  onDoubleClick={() => {
+                    if (!highlightMode) {
+                      submitChoice(question, choice.id);
+                    }
+                  }}
+                  type="button"
+                >
+                  <span className="w-5 shrink-0 font-medium text-text-muted">
+                    {choice.id}
                   </span>
-                ) : null}
-                {revealed && correct ? (
-                  <Check className="shrink-0 text-accent" size={18} aria-hidden="true" />
-                ) : null}
-                {revealed && selected && !correct ? (
-                  <X className="shrink-0 text-danger" size={18} aria-hidden="true" />
-                ) : null}
-              </button>
+                  <span className={cn("min-w-0 flex-1", excluded && "line-through")}>
+                    {renderHighlightedText(
+                      choice.text,
+                      highlights,
+                      highlightMode ? (token) => highlightToken(question.id, token) : undefined
+                    )}
+                  </span>
+                  {revealed && statTotal ? (
+                    <span className="shrink-0 tabular-nums text-body-sm text-text-subtle">
+                      {Math.round(((statByChoice.get(choice.id) || 0) / statTotal) * 100)}%
+                    </span>
+                  ) : null}
+                  {revealed && correct ? (
+                    <Check className="shrink-0 text-accent" size={18} aria-hidden="true" />
+                  ) : null}
+                  {revealed && selected && !correct ? (
+                    <X className="shrink-0 text-danger" size={18} aria-hidden="true" />
+                  ) : null}
+                </button>
+                <button
+                  aria-label={`${choice.id} ausschließen`}
+                  aria-pressed={excluded}
+                  className={cn(
+                    "flex w-[44px] min-w-[44px] shrink-0 items-center justify-center border-l border-border text-text-subtle transition-colors hover:bg-surface-muted hover:text-text",
+                    excluded && "text-danger"
+                  )}
+                  disabled={locked}
+                  onClick={() => toggleExcludedChoice(question, choice.id)}
+                  title={excluded ? "Ausschluss aufheben" : "Antwort ausschließen"}
+                  type="button"
+                >
+                  <Ban size={17} aria-hidden="true" />
+                </button>
+              </div>
             );
           })}
         </div>
+
+        {!revealed ? (
+          <Button
+            disabled={!currentSelected}
+            onClick={() => submitChoice(question)}
+            variant="primary"
+          >
+            {mode === "exam" && examAnswers[question.id]
+              ? "Weiter"
+              : mode === "exam"
+                ? "Auswahl bestätigen"
+                : "Antwort abgeben"}
+          </Button>
+        ) : null}
 
         {currentSelected && revealed ? (
           <section className="grid gap-3 rounded border border-border bg-surface-muted p-4">
@@ -2287,36 +2672,20 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     const revealed = mode !== "exam" || examFinished;
     const image = proxiedImage(question.imageUrl);
     const isBookmarked = bookmarkedIds.has(question.id);
+    const highlights = questionHighlights[question.id] || [];
 
     return (
-      <article className="grid gap-5">
-        <div className="flex items-start justify-between gap-4">
+      <article
+        className="grid gap-5"
+        onMouseUp={() => captureHighlight(question.id)}
+        ref={questionContentRef}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="grid min-w-0 gap-1">
             <span className="text-label text-text-subtle">{question.subject}</span>
             <strong className="text-body font-medium">{question.topic}</strong>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              className="px-3"
-              onClick={() => toggleBookmark(question.id)}
-              variant="ghost"
-            >
-              {isBookmarked ? (
-                <BookmarkCheck size={18} aria-hidden="true" />
-              ) : (
-                <Bookmark size={18} aria-hidden="true" />
-              )}
-              <span>{isBookmarked ? "Gespeichert" : "Speichern"}</span>
-            </Button>
-            <Button
-              className="px-3"
-              onClick={() => setReportOpen((current) => !current)}
-              variant="ghost"
-            >
-              <FileWarning size={18} aria-hidden="true" />
-              <span>Melden</span>
-            </Button>
-          </div>
+          {renderQuestionActions(question, isBookmarked)}
         </div>
 
         <div className="grid gap-4" ref={stemRef}>
@@ -2324,7 +2693,11 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             Freitext
           </span>
           <p className="m-0 whitespace-pre-line text-body leading-relaxed text-text">
-            {question.stem}
+            {renderHighlightedText(
+              question.stem,
+              highlights,
+              highlightMode ? (token) => highlightToken(question.id, token) : undefined
+            )}
           </p>
           {image ? (
             <img alt="" className="max-h-96 rounded border border-border" loading="lazy" src={image} />
