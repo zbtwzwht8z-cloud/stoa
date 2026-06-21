@@ -51,11 +51,7 @@ import {
 } from "@/lib/curriculum";
 import { buildCurriculum } from "@/lib/papers";
 import { compareTopicBySemester, questionSemesterKey } from "@/lib/semesters";
-import {
-  LANG_STORAGE_KEY,
-  createTranslator,
-  type Lang
-} from "@/lib/i18n";
+import { createTranslator, type Lang } from "@/lib/i18n";
 import type {
   BookmarkFolder,
   LeaderboardEntry,
@@ -78,7 +74,6 @@ type View =
   | "dashboard"
   | "subjects"
   | "trainer"
-  | "sessions"
   | "search"
   | "mistakes"
   | "bookmarks"
@@ -99,13 +94,12 @@ const navItems: Array<{
   icon: typeof LayoutDashboard;
   admin?: boolean;
 }> = [
-  { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { view: "subjects", label: "Papers", icon: BookOpenCheck },
-  { view: "trainer", label: "Trainer", icon: Play },
-  { view: "sessions", label: "Sessions", icon: History },
-  { view: "search", label: "Search", icon: Search },
-  { view: "mistakes", label: "Mistakes", icon: NotebookPen },
-  { view: "bookmarks", label: "Bookmarks", icon: BookMarked },
+  { view: "dashboard", label: "Übersicht", icon: LayoutDashboard },
+  { view: "subjects", label: "Klausuren", icon: BookOpenCheck },
+  { view: "trainer", label: "Sitzungen", icon: History },
+  { view: "search", label: "Suche", icon: Search },
+  { view: "mistakes", label: "Fehler", icon: NotebookPen },
+  { view: "bookmarks", label: "Lesezeichen", icon: BookMarked },
   { view: "admin", label: "Admin", icon: Shield, admin: true }
 ];
 
@@ -186,7 +180,7 @@ function orderQuestions(items: Question[], order: SessionOrder) {
 function defaultFolder(): BookmarkFolder {
   return {
     id: "default",
-    name: "Saved",
+    name: "Gespeichert",
     color: "#216e62",
     questionIds: [],
     createdAt: now()
@@ -292,7 +286,7 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: "Request failed" }));
+    const body = await response.json().catch(() => ({ error: "Anfrage fehlgeschlagen" }));
 
     throw new Error(body.error || `Request failed: ${response.status}`);
   }
@@ -307,7 +301,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   const [authChecked, setAuthChecked] = useState(false);
   const [view, setView] = useState<View>("dashboard");
   const [navOpen, setNavOpen] = useState(false);
-  const [lang, setLang] = useState<Lang>("en");
+  const lang: Lang = "de";
   const [user, setUser] = useState<TrainerUser | null>(null);
   const [users, setUsers] = useState<TrainerUser[]>([]);
   const [devLogin, setDevLogin] = useState<null | { username: string; password: string }>(
@@ -347,8 +341,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   const [examFinished, setExamFinished] = useState(false);
   const [studyFinished, setStudyFinished] = useState(false);
   const [sessionStartedAt, setSessionStartedAt] = useState(now());
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [selectedMistakeIds, setSelectedMistakeIds] = useState<string[]>([]);
+  const [papersTab, setPapersTab] = useState<"papers" | "custom">("papers");
   const [searchQuery, setSearchQuery] = useState("");
   const [newFolderName, setNewFolderName] = useState("");
   const [reportType, setReportType] = useState<ReportType>("wrong-answer");
@@ -380,9 +373,9 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   }, [questions]);
   const selectedSemesterLabel =
     selectedSemester === "all"
-      ? "All semesters"
+      ? "Alle Semester"
       : semesters.find((semester) => semester.key === selectedSemester)?.label ||
-        "Selected semester";
+        "Ausgewähltes Semester";
   const semesterQuestions = useMemo(
     () =>
       selectedSemester === "all"
@@ -511,11 +504,6 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     () => buildCurriculum(questions, progress),
     [progress, questions]
   );
-  const selectedSession =
-    sessionLogs.find((session) => session.id === selectedSessionId) ||
-    sessionLogs[0] ||
-    null;
-
   useEffect(() => {
     if (selectedSubject !== "all" && !subjects.includes(selectedSubject)) {
       setSelectedSubject(subjects[0] || "all");
@@ -688,7 +676,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       setQuestions(data.questions);
     } catch (error) {
       setQuestionsError(
-        error instanceof Error ? error.message : "Could not load questions"
+        error instanceof Error ? error.message : "Fragen konnten nicht geladen werden"
       );
     } finally {
       setQuestionsReady(true);
@@ -823,17 +811,8 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   ]);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(LANG_STORAGE_KEY);
-
-    if (stored === "en" || stored === "de") {
-      setLang(stored);
-    }
+    document.documentElement.lang = "de";
   }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(LANG_STORAGE_KEY, lang);
-    document.documentElement.lang = lang;
-  }, [lang]);
 
   function endSession() {
     setSessionIds([]);
@@ -851,14 +830,60 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   }
 
   function sessionLabel(nextMode = mode, nextPool = pool) {
+    // A readable name describing what the session actually contains, e.g.
+    // "Lernen · Allgemeinmedizin · Neue Fragen". Falls back to the semester
+    // when no subject is picked.
     const parts = [
-      selectedSemesterLabel,
-      selectedSubject === "all" ? "All subjects" : selectedSubject,
+      selectedSubject === "all" ? selectedSemesterLabel : selectedSubject,
       selectedTopic === "all" ? null : selectedTopic,
-      nextPool === "all" ? null : nextPool
+      poolLabel(nextPool)
     ].filter(Boolean);
 
-    return `${nextMode} · ${parts.join(" / ")}`;
+    return `${modeLabel(nextMode)} · ${parts.join(" · ")}`;
+  }
+
+  function modeLabel(value: SessionMode) {
+    if (value === "exam") {
+      return "Prüfung";
+    }
+
+    if (value === "review") {
+      return "Wiederholung";
+    }
+
+    return "Lernen";
+  }
+
+  function poolLabel(value: Pool) {
+    const labels: Record<Pool, string | null> = {
+      all: null,
+      unanswered: "Neue Fragen",
+      wrong: "Falsch beantwortet",
+      bookmarked: "Gespeichert"
+    };
+
+    return labels[value];
+  }
+
+  // Builds a descriptive name for a multi-paper session: groups by subject and
+  // lists the exam terms, e.g. "Anatomie · WS20/21, SS21" or "Anatomie,
+  // Physiologie" for several subjects. Never just "N Klausuren".
+  function describePapers(papers: PaperSummary[]) {
+    const subjects = Array.from(new Set(papers.map((paper) => paper.subject)));
+
+    if (subjects.length === 1) {
+      const terms = papers.map((paper) => paper.examTerm).filter(Boolean);
+
+      return terms.length
+        ? `${subjects[0]} · ${terms.join(", ")}`
+        : subjects[0];
+    }
+
+    if (subjects.length <= 3) {
+      return subjects.join(", ");
+    }
+
+    return `${subjects.slice(0, 3).join(", ")} +${subjects.length - 3}`;
   }
 
   function startSessionFromIds(
@@ -926,8 +951,8 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     setPool(nextPool);
     startSessionFromIds(picked, nextMode, sessionLabel(nextMode, nextPool), {
       semester: selectedSemesterLabel,
-      subject: selectedSubject === "all" ? "All subjects" : selectedSubject,
-      topic: selectedTopic === "all" ? "All topics" : selectedTopic,
+      subject: selectedSubject === "all" ? "Alle Fächer" : selectedSubject,
+      topic: selectedTopic === "all" ? "Alle Themen" : selectedTopic,
       pool: nextPool,
       order: sessionOrder
     });
@@ -973,13 +998,13 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       ? [single.semesterLabel, single.subject, single.examTerm]
           .filter(Boolean)
           .join(" · ")
-      : `${papers.length} papers`;
+      : describePapers(papers);
 
     startSessionFromIds(ids, nextMode, label, {
       paperKey: single?.key,
-      semester: single?.semesterLabel || "Multiple",
-      subject: single ? single.subject : `${papers.length} papers`,
-      topic: single ? single.examTerm : `${ids.length} questions`,
+      semester: single?.semesterLabel || "Mehrere",
+      subject: single ? single.subject : describePapers(papers),
+      topic: single ? single.examTerm : `${ids.length} Fragen`,
       pool: "all",
       order: "paper"
     });
@@ -1139,7 +1164,8 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           correct,
           mistakeQuestionIds,
           startedAt: sessionStartedAt,
-          finishedAt: now()
+          finishedAt: now(),
+          closed: true
         };
 
         return {
@@ -1157,7 +1183,8 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                 answered: answeredIds.length,
                 correct,
                 mistakeQuestionIds,
-                finishedAt: now()
+                finishedAt: now(),
+                closed: true
               }
             : session
         )
@@ -1272,7 +1299,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     });
     setReportText("");
     setReportType("wrong-answer");
-    setNotice("Report sent");
+    setNotice("Meldung gesendet");
     refreshReports();
     if (user?.role === "admin") {
       refreshAdmin();
@@ -1285,7 +1312,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       body: JSON.stringify({
         id: reportId,
         status: "resolved",
-        resolution: "Reviewed"
+        resolution: "Geprüft"
       })
     });
     refreshReports();
@@ -1302,7 +1329,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     const name = newUserName.trim();
 
     if (!name || newUserPassword.length < 8) {
-      setNotice("Name and a password of at least 8 characters are required");
+      setNotice("Name und ein Passwort mit mindestens 8 Zeichen sind erforderlich");
       return;
     }
 
@@ -1318,10 +1345,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       setNewUserName("");
       setNewUserPassword("");
       setNewUserRole("member");
-      setNotice("User added");
+      setNotice("Benutzer hinzugefügt");
       refreshUsers();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not add user");
+      setNotice(error instanceof Error ? error.message : "Benutzer konnte nicht hinzugefügt werden");
     }
   }
 
@@ -1338,7 +1365,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       setNotice(successMessage);
       refreshUsers();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Update failed");
+      setNotice(error instanceof Error ? error.message : "Aktualisierung fehlgeschlagen");
     }
   }
 
@@ -1355,18 +1382,18 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       return;
     }
 
-    patchUser(userId, { name }, "User renamed");
+    patchUser(userId, { name }, "Benutzer umbenannt");
   }
 
   function resetUserPassword(userId: string) {
     const password = (editingPasswords[userId] || "").trim();
 
     if (password.length < 8) {
-      setNotice("New password must be at least 8 characters");
+      setNotice("Das neue Passwort muss mindestens 8 Zeichen haben");
       return;
     }
 
-    patchUser(userId, { password }, "Password reset").then(() =>
+    patchUser(userId, { password }, "Passwort zurückgesetzt").then(() =>
       setEditingPasswords((current) => {
         const { [userId]: _removed, ...rest } = current;
 
@@ -1384,10 +1411,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       await jsonFetch(`/api/admin/users?id=${encodeURIComponent(userId)}`, {
         method: "DELETE"
       });
-      setNotice("User removed");
+      setNotice("Benutzer entfernt");
       refreshUsers();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not remove user");
+      setNotice(error instanceof Error ? error.message : "Benutzer konnte nicht entfernt werden");
     }
   }
 
@@ -1409,7 +1436,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       refreshLeaderboard();
       refreshReports();
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Login failed");
+      setAuthError(error instanceof Error ? error.message : "Anmeldung fehlgeschlagen");
     }
   }
 
@@ -1441,7 +1468,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     });
 
     setProgress(normalizeProgress(data.progress));
-    setNotice("Progress imported");
+    setNotice("Fortschritt importiert");
   }
 
   function jumpToQuestion(questionId: string) {
@@ -1459,7 +1486,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         <AlertTriangle className="text-danger" size={28} aria-hidden="true" />
         <p className="m-0 text-body text-text-muted">{questionsError}</p>
         <Button onClick={loadQuestions} variant="secondary">
-          Try again
+          Erneut versuchen
         </Button>
       </main>
     );
@@ -1470,7 +1497,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       <main className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 bg-bg px-6 font-sans text-body text-text">
         <Gauge className="text-text-subtle" size={28} aria-hidden="true" />
         <p className="m-0 text-body text-text-muted">
-          {!authChecked ? "Loading trainer" : ready ? "Loading question bank" : "Loading trainer"}
+          {ready && authChecked ? "Fragenkatalog wird geladen" : "Wird geladen"}
         </p>
       </main>
     );
@@ -1484,8 +1511,6 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         loginPassword={loginPassword}
         authError={authError}
         devLogin={devLogin}
-        lang={lang}
-        onLangChange={setLang}
         t={t}
         onLoginNameChange={setLoginName}
         onLoginPasswordChange={setLoginPassword}
@@ -1543,9 +1568,11 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       <div className="mt-auto flex items-center justify-between gap-4 border-t border-border pt-4">
         <div className="grid min-w-0 gap-1">
           <strong className="truncate text-body-sm font-medium">{user.name}</strong>
-          <span className="text-label text-text-subtle">{user.role}</span>
+          <span className="text-label text-text-subtle">
+            {user.role === "admin" ? "Admin" : "Mitglied"}
+          </span>
         </div>
-        <Button aria-label="Log out" className="px-3" onClick={logout} variant="ghost">
+        <Button aria-label="Abmelden" className="px-3" onClick={logout} variant="ghost">
           <LogOut size={17} aria-hidden="true" />
         </Button>
       </div>
@@ -1572,46 +1599,26 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-bg/90 px-6 py-4 backdrop-blur lg:px-8">
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-bg/90 px-8 py-5 backdrop-blur lg:px-12">
           <Button
-            aria-label="Open navigation"
+            aria-label="Navigation öffnen"
             className="px-2 md:hidden"
             onClick={() => setNavOpen(true)}
             variant="ghost"
           >
             <Menu size={20} aria-hidden="true" />
           </Button>
-          <h1 className="m-0 text-h2 font-semibold">{t(`nav.${view}`)}</h1>
-          <div
-            aria-label="Language"
-            className="ml-auto flex rounded border border-border bg-surface p-1"
-            role="group"
-          >
-            {(["en", "de"] as const).map((option) => (
-              <Button
-                aria-pressed={lang === option}
-                className={cn(
-                  "px-3 uppercase",
-                  lang === option && "bg-surface-muted text-text"
-                )}
-                key={option}
-                onClick={() => setLang(option)}
-                variant={lang === option ? "secondary" : "ghost"}
-              >
-                {option}
-              </Button>
-            ))}
-          </div>
+          <h1 className="m-0 text-h2 font-semibold">{titleForView(view)}</h1>
         </header>
 
         {notice ? (
           <div
-            className="mx-6 mt-4 flex items-center justify-between gap-4 rounded border border-border bg-surface px-4 py-3 text-body-sm text-text lg:mx-8"
+            className="mx-8 mt-6 flex items-center justify-between gap-4 rounded border border-border bg-surface px-4 py-3 text-body-sm text-text lg:mx-12"
             role="status"
           >
             <span>{notice}</span>
             <Button
-              aria-label="Dismiss"
+              aria-label="Schließen"
               className="px-2"
               onClick={() => setNotice("")}
               variant="ghost"
@@ -1621,11 +1628,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           </div>
         ) : null}
 
-        <div className="min-w-0 flex-1 p-6 lg:p-8">
+        <div className="min-w-0 flex-1 px-8 py-8 lg:px-12 lg:py-10">
           {view === "dashboard" ? renderDashboard() : null}
           {view === "subjects" ? renderSubjects() : null}
           {view === "trainer" ? renderTrainer() : null}
-          {view === "sessions" ? renderSessions() : null}
           {view === "search" ? renderSearch() : null}
           {view === "mistakes" ? renderMistakes() : null}
           {view === "bookmarks" ? renderBookmarks() : null}
@@ -1660,7 +1666,13 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         <section className="grid gap-4">
           <h2 className="m-0 text-h3 font-semibold">{t("dashboard.start")}</h2>
           <div className="flex flex-wrap gap-4">
-            <Button onClick={() => setView("trainer")} variant="primary">
+            <Button
+              onClick={() => {
+                setPapersTab("custom");
+                setView("subjects");
+              }}
+              variant="primary"
+            >
               <Play size={18} aria-hidden="true" />
               {t("dashboard.custom")}
             </Button>
@@ -1675,31 +1687,33 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               <ListChecks size={18} aria-hidden="true" />
               {t("dashboard.review")}
             </Button>
-            <Button onClick={() => setView("subjects")} variant="secondary">
+            <Button
+              onClick={() => {
+                setPapersTab("papers");
+                setView("subjects");
+              }}
+              variant="secondary"
+            >
               <BookOpenCheck size={18} aria-hidden="true" />
               {t("dashboard.papers")}
             </Button>
           </div>
           <p className="m-0 text-body-sm text-text-muted">
-            {formatNumber(stats.answered)} of {formatNumber(questions.length)}{" "}
-            questions answered · {sessionLogs.length} saved{" "}
-            {sessionLogs.length === 1 ? "session" : "sessions"}
+            {formatNumber(stats.answered)} von {formatNumber(questions.length)} Fragen
+            beantwortet · {sessionLogs.length}{" "}
+            {sessionLogs.length === 1 ? "Sitzung" : "Sitzungen"}
           </p>
         </section>
 
         {recentSessions.length ? (
           <section className="grid gap-4">
             <h2 className="m-0 text-h3 font-semibold">{t("dashboard.recent")}</h2>
-            <div className="divide-y divide-border border-y border-border">
+            <div className="grid gap-4">
               {recentSessions.map((session) => (
                 <button
-                  className="flex w-full items-center justify-between gap-4 px-2 py-5 text-left transition-colors hover:bg-surface-muted"
+                  className="flex w-full items-center justify-between gap-4 rounded border border-border bg-surface px-4 py-4 text-left transition-colors hover:bg-surface-muted"
                   key={session.id}
-                  onClick={() => {
-                    setSelectedSessionId(session.id);
-                    setSelectedMistakeIds(session.mistakeQuestionIds || []);
-                    setView("sessions");
-                  }}
+                  onClick={() => setView("trainer")}
                   type="button"
                 >
                   <span className="min-w-0 truncate text-body font-medium text-text">
@@ -1709,7 +1723,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                     {session.answered
                       ? `${Math.round((session.correct / session.answered) * 100)}%`
                       : "—"}{" "}
-                    · {new Date(session.finishedAt).toLocaleDateString()}
+                    · {new Date(session.finishedAt).toLocaleDateString("de-DE")}
                   </span>
                 </button>
               ))}
@@ -1726,8 +1740,8 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                   key={entry.userId}
                   meta={
                     <>
-                      <span>{entry.weeklyAnswered} answered</span>
-                      <span>{entry.accuracy}% accuracy</span>
+                      <span>{entry.weeklyAnswered} beantwortet</span>
+                      <span>{entry.accuracy}% Trefferquote</span>
                     </>
                   }
                   title={`${index + 1}. ${entry.name}`}
@@ -1749,9 +1763,11 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         onSemesterChange={setPapersSemester}
         onStartPaper={startPaper}
         onStartPapers={startPapers}
+        onTabChange={setPapersTab}
         selectedSemester={papersSemester}
         semesters={curriculum}
         t={t}
+        tab={papersTab}
       />
     );
   }
@@ -1760,7 +1776,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     const ids = session.questionIds.filter((questionId) => questionById.has(questionId));
 
     if (!ids.length) {
-      setNotice("That session has no available questions");
+      setNotice("Diese Sitzung enthält keine verfügbaren Fragen");
       return;
     }
 
@@ -1783,17 +1799,15 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       const latestMistakeSession = sessionLogs.find(
         (session) => session.mistakeQuestionIds?.length
       );
-      const openSessions = sessionLogs.filter(
-        (session) =>
-          session.mode !== "exam" && session.answered < session.questionIds.length
-      );
+      const openSessions = sessionLogs.filter(isOpenSession);
+      const history = sessionLogs.filter((session) => !isOpenSession(session));
 
       return (
-        <div className="mx-auto grid max-w-content gap-6">
+        <div className="mx-auto grid max-w-content gap-8">
           <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6">
             <p className="m-0 max-w-[480px] text-body text-text-muted">
-              Resume an open session below, or build a custom session from the
-              Klausuren tab.
+              Setze eine offene Sitzung fort oder erstelle eine neue über den
+              Reiter „Klausuren".
             </p>
             <Button
               onClick={() =>
@@ -1804,36 +1818,32 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               variant="primary"
             >
               <ListChecks size={18} aria-hidden="true" />
-              <span>Review wrong answers</span>
+              <span>Fehler wiederholen</span>
             </Button>
           </div>
 
           {openSessions.length ? (
-            <section className="grid gap-3">
-              <h2 className="m-0 text-h3 font-semibold">Open sessions</h2>
-              <div className="divide-y divide-border border-y border-border">
-                {openSessions.map((session) => (
-                  <button
-                    className="flex w-full items-center justify-between gap-4 px-1 py-4 text-left transition-colors hover:bg-surface-muted"
-                    key={session.id}
-                    onClick={() => resumeSession(session)}
-                    type="button"
-                  >
-                    <span className="min-w-0 truncate text-body font-medium text-text">
-                      {session.label}
-                    </span>
-                    <span className="shrink-0 text-body-sm text-text-muted">
-                      {session.answered}/{session.questionIds.length} answered
-                    </span>
-                  </button>
-                ))}
+            <section className="grid gap-4">
+              <h2 className="m-0 text-h3 font-semibold">Offene Sitzungen</h2>
+              <div className="grid gap-4">
+                {openSessions.map((session) => renderSessionCard(session))}
               </div>
             </section>
-          ) : (
-            <p className="m-0 border-y border-border py-4 text-body text-text-muted">
-              No open sessions. Start one from the Klausuren tab.
-            </p>
-          )}
+          ) : null}
+
+          <section className="grid gap-4">
+            <h2 className="m-0 text-h3 font-semibold">Verlauf</h2>
+            {history.length ? (
+              <div className="grid gap-4">
+                {history.map((session) => renderSessionCard(session))}
+              </div>
+            ) : (
+              <p className="m-0 rounded border border-border bg-surface px-4 py-6 text-body text-text-muted">
+                Noch keine abgeschlossenen Sitzungen. Starte eine über den Reiter
+                „Klausuren".
+              </p>
+            )}
+          </section>
         </div>
       );
     }
@@ -1851,7 +1861,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
           <div className="flex min-w-0 items-center gap-2">
             <Button
-              aria-label="End session"
+              aria-label="Sitzung verlassen"
               className="px-2"
               onClick={endSession}
               variant="ghost"
@@ -1860,28 +1870,28 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             </Button>
             <div className="min-w-0">
               <p className="m-0 truncate text-body font-medium">
-                {activeSession?.label || "Session"}
+                {activeSession?.label || "Sitzung"}
               </p>
               <p className="m-0 text-body-sm text-text-muted">
-                {total ? activeIndex + 1 : 0} of {total}
+                {total ? activeIndex + 1 : 0} von {total}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Button className="px-3" onClick={() => setQueueOpen(true)} variant="ghost">
               <ListChecks size={18} aria-hidden="true" />
-              <span>Queue</span>
+              <span>Übersicht</span>
             </Button>
             {mode === "exam" && !examFinished ? (
               <Button onClick={finishExam} variant="primary">
                 <Timer size={16} aria-hidden="true" />
-                Finish
+                Abschließen
               </Button>
             ) : null}
             {mode !== "exam" && !studyFinished ? (
-              <Button onClick={() => setStudyFinished(true)} variant="primary">
+              <Button onClick={submitStudySession} variant="primary">
                 <Check size={16} aria-hidden="true" />
-                Submit
+                Abgeben
               </Button>
             ) : null}
           </div>
@@ -1900,7 +1910,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           >
             <Button disabled={activeIndex === 0} onClick={goPrev} variant="secondary">
               <ChevronLeft size={18} aria-hidden="true" />
-              <span>Previous</span>
+              <span>Zurück</span>
             </Button>
             <span className="text-body-sm text-text-muted">
               {total ? activeIndex + 1 : 0} / {total}
@@ -1910,7 +1920,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               onClick={goNext}
               variant="secondary"
             >
-              <span>Next</span>
+              <span>Weiter</span>
               <ChevronRight size={18} aria-hidden="true" />
             </Button>
           </div>
@@ -1919,6 +1929,16 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         {queueOpen ? renderQueueDrawer() : null}
       </div>
     );
+  }
+
+  // Submits a study/review session: marks it closed (moves it to history) and
+  // shows the score screen.
+  function submitStudySession() {
+    if (activeSessionLogId) {
+      closeSession(activeSessionLogId);
+    }
+
+    setStudyFinished(true);
   }
 
   function renderStudyResults() {
@@ -1934,16 +1954,16 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     return (
       <section className="grid gap-5 rounded border border-border bg-surface p-6 text-center">
         <div className="grid gap-1">
-          <span className="text-label text-text-subtle">Session complete</span>
+          <span className="text-label text-text-subtle">Sitzung abgeschlossen</span>
           <strong className="text-h1 font-semibold text-accent">{accuracy}%</strong>
           <p className="m-0 text-body-sm text-text-muted">
-            {correct} of {answered} graded correct · {total} questions total
+            {correct} von {answered} bewertet richtig · {total} Fragen insgesamt
           </p>
         </div>
         <div className="flex flex-wrap justify-center gap-3">
           <Button onClick={() => setStudyFinished(false)} variant="secondary">
             <ChevronLeft size={18} aria-hidden="true" />
-            <span>Keep reviewing</span>
+            <span>Weiter ansehen</span>
           </Button>
           {mistakeIds.length ? (
             <Button
@@ -1951,11 +1971,11 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               variant="primary"
             >
               <ListChecks size={18} aria-hidden="true" />
-              <span>Review {mistakeIds.length} mistakes</span>
+              <span>{mistakeIds.length} Fehler üben</span>
             </Button>
           ) : null}
           <Button onClick={endSession} variant="ghost">
-            End session
+            Sitzung verlassen
           </Button>
         </div>
       </section>
@@ -1971,13 +1991,13 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           onClick={() => setQueueOpen(false)}
         />
         <aside
-          aria-label="Question queue"
+          aria-label="Fragenübersicht"
           className="absolute inset-y-0 right-0 flex w-80 max-w-[85%] flex-col border-l border-border bg-surface"
         >
           <div className="flex items-center justify-between border-b border-border p-4">
-            <strong className="text-body font-semibold">Queue</strong>
+            <strong className="text-body font-semibold">Übersicht</strong>
             <Button
-              aria-label="Close queue"
+              aria-label="Übersicht schließen"
               className="px-2"
               onClick={() => setQueueOpen(false)}
               variant="ghost"
@@ -2070,7 +2090,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               ) : (
                 <Bookmark size={18} aria-hidden="true" />
               )}
-              <span>{isBookmarked ? "Saved" : "Save"}</span>
+              <span>{isBookmarked ? "Gespeichert" : "Speichern"}</span>
             </Button>
             <Button
               className="px-3"
@@ -2078,7 +2098,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               variant="ghost"
             >
               <FileWarning size={18} aria-hidden="true" />
-              <span>Report</span>
+              <span>Melden</span>
             </Button>
           </div>
         </div>
@@ -2146,14 +2166,14 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                 <AlertTriangle className="text-danger" size={18} aria-hidden="true" />
               )}
               <strong className="text-body font-medium">
-                {isCorrect ? "Correct" : "Marked for review"}
+                {isCorrect ? "Richtig" : "Falsch"}
               </strong>
             </div>
 
             {correctPct !== null && stats ? (
               <p className="m-0 text-body-sm text-text-muted">
-                {correctPct}% answered this correctly · {formatNumber(stats.answered)}{" "}
-                attempts
+                {correctPct}% haben richtig geantwortet · {formatNumber(stats.answered)}{" "}
+                Versuche
               </p>
             ) : null}
 
@@ -2166,7 +2186,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             {question.notes?.length ? (
               <div className="grid gap-2 border-t border-border pt-3">
                 <strong className="text-body-sm font-medium text-text-muted">
-                  Comments and corrections
+                  Kommentare und Korrekturen
                 </strong>
                 {question.notes.map((note, index) => (
                   <p
@@ -2180,12 +2200,12 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             ) : null}
 
             {storedAnswer ? (
-              <div aria-label="Confidence" className="flex flex-wrap gap-2 pt-1">
+              <div aria-label="Selbsteinschätzung" className="flex flex-wrap gap-2 pt-1">
                 {(
                   [
-                    ["low", "Guessed"],
-                    ["medium", "Unsure"],
-                    ["high", "Knew it"]
+                    ["low", "Geraten"],
+                    ["medium", "Unsicher"],
+                    ["high", "Gewusst"]
                   ] as const
                 ).map(([value, label]) => (
                   <Button
@@ -2205,7 +2225,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         {mode === "exam" && !examFinished && currentSelected ? (
           <section className="flex items-center gap-2 rounded border border-border bg-surface-muted p-4 text-body-sm text-text-muted">
             <Timer size={18} aria-hidden="true" />
-            <span>Exam mode keeps feedback hidden until you finish the session.</span>
+            <span>Im Prüfungsmodus bleibt das Feedback bis zum Abschluss der Sitzung verborgen.</span>
           </section>
         ) : null}
 
@@ -2216,14 +2236,14 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                 onChange={(event) => setReportType(event.target.value as ReportType)}
                 value={reportType}
               >
-                <option value="wrong-answer">Wrong answer</option>
-                <option value="typo">Typo</option>
-                <option value="unclear">Unclear</option>
-                <option value="other">Other</option>
+                <option value="wrong-answer">Falsche Antwort</option>
+                <option value="typo">Tippfehler</option>
+                <option value="unclear">Unklar</option>
+                <option value="other">Sonstiges</option>
               </Select>
               <Input
                 onChange={(event) => setReportText(event.target.value)}
-                placeholder="Correction, typo, or note for admins"
+                placeholder="Korrektur, Tippfehler oder Hinweis für Admins"
                 value={reportText}
               />
             </div>
@@ -2237,10 +2257,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                 variant="primary"
               >
                 <Upload size={17} aria-hidden="true" />
-                Send
+                Senden
               </Button>
               <Button onClick={() => setReportOpen(false)} variant="ghost">
-                Cancel
+                Abbrechen
               </Button>
             </div>
           </section>
@@ -2255,7 +2275,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             variant="ghost"
           >
             <RotateCcw size={17} aria-hidden="true" />
-            <span>Clear answer</span>
+            <span>Antwort löschen</span>
           </Button>
         </footer>
       </article>
@@ -2286,7 +2306,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               ) : (
                 <Bookmark size={18} aria-hidden="true" />
               )}
-              <span>{isBookmarked ? "Saved" : "Save"}</span>
+              <span>{isBookmarked ? "Gespeichert" : "Speichern"}</span>
             </Button>
             <Button
               className="px-3"
@@ -2294,14 +2314,14 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               variant="ghost"
             >
               <FileWarning size={18} aria-hidden="true" />
-              <span>Report</span>
+              <span>Melden</span>
             </Button>
           </div>
         </div>
 
         <div className="grid gap-4" ref={stemRef}>
           <span className="inline-flex w-fit items-center rounded border border-border px-2 py-0.5 text-label text-text-subtle">
-            Free response
+            Freitext
           </span>
           <p className="m-0 whitespace-pre-line text-body leading-relaxed text-text">
             {question.stem}
@@ -2313,16 +2333,16 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
 
         {!storedAnswer ? (
           <Button onClick={() => revealFreeText(question)} variant="primary">
-            Show answer
+            Antwort anzeigen
           </Button>
         ) : !revealed ? (
           <section className="flex items-center gap-2 rounded border border-border bg-surface-muted p-4 text-body-sm text-text-muted">
             <Timer size={18} aria-hidden="true" />
-            <span>The model answer is hidden until you finish the exam.</span>
+            <span>Die Musterantwort ist bis zum Abschluss der Prüfung verborgen.</span>
           </section>
         ) : (
           <section className="grid gap-3 rounded border border-border bg-surface-muted p-4">
-            <strong className="text-body font-medium">Model answer</strong>
+            <strong className="text-body font-medium">Musterantwort</strong>
             <p className="m-0 whitespace-pre-line text-body-sm text-text">
               {question.modelAnswer}
             </p>
@@ -2336,7 +2356,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             {question.notes?.length ? (
               <div className="grid gap-2 border-t border-border pt-3">
                 <strong className="text-body-sm font-medium text-text-muted">
-                  Comments and corrections
+                  Kommentare und Korrekturen
                 </strong>
                 {question.notes.map((note, index) => (
                   <p
@@ -2349,12 +2369,12 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               </div>
             ) : null}
 
-            <div aria-label="Confidence" className="flex flex-wrap gap-2 pt-1">
+            <div aria-label="Selbsteinschätzung" className="flex flex-wrap gap-2 pt-1">
               {(
                 [
-                  ["low", "Guessed"],
-                  ["medium", "Unsure"],
-                  ["high", "Knew it"]
+                  ["low", "Geraten"],
+                  ["medium", "Unsicher"],
+                  ["high", "Gewusst"]
                 ] as const
               ).map(([value, label]) => (
                 <Button
@@ -2377,14 +2397,14 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                 onChange={(event) => setReportType(event.target.value as ReportType)}
                 value={reportType}
               >
-                <option value="wrong-answer">Wrong answer</option>
-                <option value="typo">Typo</option>
-                <option value="unclear">Unclear</option>
-                <option value="other">Other</option>
+                <option value="wrong-answer">Falsche Antwort</option>
+                <option value="typo">Tippfehler</option>
+                <option value="unclear">Unklar</option>
+                <option value="other">Sonstiges</option>
               </Select>
               <Input
                 onChange={(event) => setReportText(event.target.value)}
-                placeholder="Correction, typo, or note for admins"
+                placeholder="Korrektur, Tippfehler oder Hinweis für Admins"
                 value={reportText}
               />
             </div>
@@ -2398,10 +2418,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                 variant="primary"
               >
                 <Upload size={17} aria-hidden="true" />
-                Send
+                Senden
               </Button>
               <Button onClick={() => setReportOpen(false)} variant="ghost">
-                Cancel
+                Abbrechen
               </Button>
             </div>
           </section>
@@ -2416,7 +2436,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             variant="ghost"
           >
             <RotateCcw size={17} aria-hidden="true" />
-            <span>Clear answer</span>
+            <span>Antwort löschen</span>
           </Button>
         </footer>
       </article>
@@ -2429,11 +2449,11 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     );
 
     if (!uniqueIds.length) {
-      setNotice("No mistakes saved for that session");
+      setNotice("Für diese Sitzung sind keine Fehler gespeichert");
       return;
     }
 
-    startSessionFromIds(uniqueIds, "review", `Mistakes · ${session.label}`, {
+    startSessionFromIds(uniqueIds, "review", `Fehler · ${session.label}`, {
       ...session.source,
       pool: "session mistakes"
     });
@@ -2443,149 +2463,142 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     const ids = session.questionIds.filter((questionId) => questionById.has(questionId));
 
     if (!ids.length) {
-      setNotice("That session has no available questions");
+      setNotice("Diese Sitzung enthält keine verfügbaren Fragen");
       return;
     }
 
-    startSessionFromIds(ids, session.mode, `Replay · ${session.label}`, session.source);
+    startSessionFromIds(ids, session.mode, `Wiederholung · ${session.label}`, session.source);
   }
 
-  function renderSessions() {
-    const activeSession = selectedSession;
-    const mistakeIds = activeSession?.mistakeQuestionIds || [];
-    const selectedIds = selectedMistakeIds.length ? selectedMistakeIds : mistakeIds;
+  // Marks a session as closed: it stays in the history with its stats, but is
+  // no longer offered for "Fortsetzen" (resume).
+  function closeSession(sessionId: string) {
+    patchProgress((current) => ({
+      ...current,
+      sessionLog: (current.sessionLog || []).map((session) =>
+        session.id === sessionId
+          ? { ...session, closed: true, finishedAt: now() }
+          : session
+      )
+    }));
+  }
+
+  // Deletes a session AND its contribution to stats: any answers that were
+  // recorded for this session's questions within its time window are removed,
+  // so accuracy/coverage no longer count them.
+  function deleteSession(session: StudySessionLog) {
+    if (activeSessionLogId === session.id) {
+      endSession();
+    }
+
+    const startedAt = new Date(session.startedAt).getTime();
+    const finishedAt = new Date(session.finishedAt).getTime();
+    const questionIds = Array.from(new Set(session.questionIds));
+
+    patchProgress((current) => {
+      const answers = { ...current.answers };
+
+      for (const questionId of questionIds) {
+        const answeredAt = answers[questionId]?.answeredAt;
+
+        if (!answeredAt) {
+          continue;
+        }
+
+        const at = new Date(answeredAt).getTime();
+
+        if (at >= startedAt && at <= finishedAt) {
+          delete answers[questionId];
+        }
+      }
+
+      return {
+        ...current,
+        answers,
+        sessionLog: (current.sessionLog || []).filter((entry) => entry.id !== session.id)
+      };
+    });
+
+    setNotice("Sitzung gelöscht");
+  }
+
+  function isOpenSession(session: StudySessionLog) {
+    return !session.closed && session.answered < session.questionIds.length;
+  }
+
+  function renderSessionCard(session: StudySessionLog) {
+    const open = isOpenSession(session);
+    const total = session.questionIds.length;
+    const mistakes = session.mistakeQuestionIds?.length || 0;
+    const graded = session.correct + mistakes;
+    const accuracy = graded ? Math.round((session.correct / graded) * 100) : null;
 
     return (
-      <div className="mx-auto grid max-w-content gap-8 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <section className="grid content-start gap-3">
-          <h2 className="m-0 text-h3 font-semibold">
-            {sessionLogs.length} saved{" "}
-            {sessionLogs.length === 1 ? "session" : "sessions"}
-          </h2>
-          {sessionLogs.length ? (
-            <div className="divide-y divide-border border-y border-border">
-              {sessionLogs.map((session) => {
-                const active = activeSession?.id === session.id;
+      <div
+        className="grid gap-3 rounded border border-border bg-surface p-4"
+        key={session.id}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="grid min-w-0 gap-1">
+            <span className="truncate text-body font-medium text-text">
+              {session.label}
+            </span>
+            <span className="text-body-sm text-text-muted">
+              {new Date(session.finishedAt).toLocaleDateString("de-DE")} ·{" "}
+              {session.answered}/{total} beantwortet
+              {accuracy !== null ? ` · ${accuracy}% richtig` : ""}
+              {mistakes ? ` · ${mistakes} Fehler` : ""}
+            </span>
+          </div>
+          <span
+            className={cn(
+              "shrink-0 rounded border px-2 py-0.5 text-label",
+              open
+                ? "border-accent text-accent"
+                : "border-border text-text-subtle"
+            )}
+          >
+            {open ? "Offen" : "Abgeschlossen"}
+          </span>
+        </div>
 
-                return (
-                  <button
-                    className={cn(
-                      "grid w-full gap-1.5 py-4 pl-3 pr-3 text-left transition-colors hover:bg-surface-muted",
-                      active &&
-                        "bg-[color-mix(in_srgb,var(--accent)_8%,var(--surface))]"
-                    )}
-                    key={session.id}
-                    onClick={() => {
-                      setSelectedSessionId(session.id);
-                      setSelectedMistakeIds(session.mistakeQuestionIds || []);
-                    }}
-                    type="button"
-                  >
-                    <span className="truncate text-body font-medium text-text">
-                      {session.label}
-                    </span>
-                    <span className="text-body-sm text-text-muted">
-                      {new Date(session.finishedAt).toLocaleDateString()} ·{" "}
-                      {session.correct}/{session.answered} correct ·{" "}
-                      {session.mistakeQuestionIds?.length || 0} mistakes
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+        <div className="flex flex-wrap gap-2">
+          {open ? (
+            <Button className="px-3" onClick={() => resumeSession(session)} variant="primary">
+              <Play size={16} aria-hidden="true" />
+              <span>Fortsetzen</span>
+            </Button>
           ) : (
-            <p className="m-0 border-y border-border py-4 text-body text-text-muted">
-              Start a session and it will appear here.
-            </p>
+            <Button className="px-3" onClick={() => replaySession(session)} variant="secondary">
+              <RotateCcw size={16} aria-hidden="true" />
+              <span>Wiederholen</span>
+            </Button>
           )}
-        </section>
-
-        <section className="grid content-start gap-5">
-          {activeSession ? (
-            <>
-              <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border pb-4">
-                <h2 className="m-0 min-w-0 text-h3 font-semibold">
-                  {activeSession.label}
-                </h2>
-                <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => replaySession(activeSession)} variant="secondary">
-                    <Play size={17} aria-hidden="true" />
-                    Replay all
-                  </Button>
-                  <Button
-                    disabled={!mistakeIds.length}
-                    onClick={() => reviewSessionMistakes(activeSession, selectedIds)}
-                    variant="primary"
-                  >
-                    <ListChecks size={17} aria-hidden="true" />
-                    Solve selected
-                  </Button>
-                </div>
-              </div>
-
-              <section className="grid grid-cols-3 gap-x-8 gap-y-4">
-                <Stat label="Questions" value={activeSession.questionIds.length} />
-                <Stat label="Answered" value={activeSession.answered} />
-                <Stat
-                  label="Mistakes"
-                  value={activeSession.mistakeQuestionIds?.length || 0}
-                />
-              </section>
-
-              {mistakeIds.length ? (
-                <div className="divide-y divide-border border-y border-border">
-                  {mistakeIds.map((questionId) => {
-                    const question = questionById.get(questionId);
-
-                    if (!question) {
-                      return null;
-                    }
-
-                    const checked = selectedIds.includes(questionId);
-
-                    return (
-                      <label
-                        className="flex cursor-pointer items-start gap-3 py-4"
-                        key={questionId}
-                      >
-                        <input
-                          checked={checked}
-                          className="mt-1 h-4 min-h-0 w-4 shrink-0 rounded border border-border accent-accent"
-                          onChange={(event) => {
-                            setSelectedMistakeIds((current) => {
-                              const base = current.length ? current : mistakeIds;
-
-                              return event.target.checked
-                                ? Array.from(new Set([...base, questionId]))
-                                : base.filter((id) => id !== questionId);
-                            });
-                          }}
-                          type="checkbox"
-                        />
-                        <span className="grid min-w-0 gap-1">
-                          <span className="text-label text-text-subtle">
-                            {question.subject} · {question.topic}
-                          </span>
-                          <span className="line-clamp-2 text-body-sm text-text">
-                            {question.stem}
-                          </span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="m-0 border-y border-border py-4 text-body text-text-muted">
-                  No mistakes in this session. Replay it or pick another.
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="m-0 border-y border-border py-4 text-body text-text-muted">
-              Select a session to review its mistakes.
-            </p>
-          )}
-        </section>
+          {mistakes ? (
+            <Button
+              className="px-3"
+              onClick={() => reviewSessionMistakes(session)}
+              variant="secondary"
+            >
+              <ListChecks size={16} aria-hidden="true" />
+              <span>Fehler üben</span>
+            </Button>
+          ) : null}
+          {open ? (
+            <Button className="px-3" onClick={() => closeSession(session.id)} variant="ghost">
+              <Check size={16} aria-hidden="true" />
+              <span>Beenden</span>
+            </Button>
+          ) : null}
+          <Button
+            className="px-3 text-danger"
+            onClick={() => deleteSession(session)}
+            variant="ghost"
+          >
+            <Trash2 size={16} aria-hidden="true" />
+            <span>Löschen</span>
+          </Button>
+        </div>
       </div>
     );
   }
@@ -2595,11 +2608,11 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
 
     return (
       <div className="mx-auto grid max-w-content gap-5">
-        <Field htmlFor="search-input" label="Search questions, answers, and comments">
+        <Field htmlFor="search-input" label="Fragen, Antworten und Kommentare durchsuchen">
           <Input
             id="search-input"
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Type at least 2 letters"
+            placeholder="Mindestens 2 Buchstaben eingeben"
             value={searchQuery}
           />
         </Field>
@@ -2623,7 +2636,9 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           </div>
         ) : (
           <p className="m-0 text-body text-text-muted">
-            {tooShort ? "Type at least 2 letters to search." : "No matches found."}
+            {tooShort
+              ? "Gib mindestens 2 Buchstaben ein, um zu suchen."
+              : "Keine Treffer gefunden."}
           </p>
         )}
       </div>
@@ -2634,8 +2649,8 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     return (
       <div className="mx-auto grid max-w-content gap-4">
         <h2 className="m-0 text-h3 font-semibold">
-          {missedQuestions.length} {missedQuestions.length === 1 ? "question" : "questions"}{" "}
-          to fix
+          {missedQuestions.length}{" "}
+          {missedQuestions.length === 1 ? "zu übende Frage" : "zu übende Fragen"}
         </h2>
         {missedQuestions.length ? (
           <div className="divide-y divide-border border-y border-border">
@@ -2653,14 +2668,14 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                   {question.stem}
                 </span>
                 <span className="text-label text-text-subtle">
-                  Picked {answer.selected}, correct {question.answer}
+                  Gewählt {answer.selected}, richtig {question.answer}
                 </span>
               </button>
             ))}
           </div>
         ) : (
           <p className="m-0 border-y border-border py-4 text-body text-text-muted">
-            No mistakes yet. They show up here after you miss a question.
+            Noch keine Fehler. Sie erscheinen hier, sobald du eine Frage falsch beantwortest.
           </p>
         )}
       </div>
@@ -2676,7 +2691,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       <div className="mx-auto grid max-w-content gap-8 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <section className="grid content-start gap-3">
           <h2 className="m-0 text-h3 font-semibold">
-            {folders.length} {folders.length === 1 ? "folder" : "folders"}
+            {folders.length} {folders.length === 1 ? "Ordner" : "Ordner"}
           </h2>
           <div className="divide-y divide-border border-y border-border">
             {folders.map((folder) => {
@@ -2717,11 +2732,11 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           <div className="flex gap-2">
             <Input
               onChange={(event) => setNewFolderName(event.target.value)}
-              placeholder="New folder"
+              placeholder="Neuer Ordner"
               value={newFolderName}
             />
             <Button onClick={createFolder} variant="secondary">
-              Add
+              Hinzufügen
             </Button>
           </div>
         </section>
@@ -2746,7 +2761,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             </div>
           ) : (
             <p className="m-0 border-y border-border py-4 text-body text-text-muted">
-              No saved questions in this folder yet.
+              Noch keine gespeicherten Fragen in diesem Ordner.
             </p>
           )}
         </section>
@@ -2764,33 +2779,33 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     return (
       <div className="mx-auto grid max-w-content gap-8">
         <section className="grid grid-cols-2 gap-x-8 gap-y-6 border-b border-border pb-6 sm:grid-cols-4">
-          <Stat label="Users" value={users.length} />
-          <Stat label="Synced users" value={adminState?.progressUsers || 0} />
-          <Stat label="Open reports" value={openReports.length} />
-          <Stat label="Storage" value={adminState?.storage || "—"} />
+          <Stat label="Benutzer" value={users.length} />
+          <Stat label="Synchronisiert" value={adminState?.progressUsers || 0} />
+          <Stat label="Offene Meldungen" value={openReports.length} />
+          <Stat label="Speicher" value={adminState?.storage || "—"} />
         </section>
 
         <section className="grid gap-4">
-          <h2 className="m-0 text-h3 font-semibold">Add user</h2>
+          <h2 className="m-0 text-h3 font-semibold">Benutzer hinzufügen</h2>
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8rem_auto] sm:items-end">
             <Field htmlFor="new-user-name" label="Name">
               <Input
                 id="new-user-name"
                 onChange={(event) => setNewUserName(event.target.value)}
-                placeholder="Display name"
+                placeholder="Anzeigename"
                 value={newUserName}
               />
             </Field>
-            <Field htmlFor="new-user-password" label="Password">
+            <Field htmlFor="new-user-password" label="Passwort">
               <Input
                 id="new-user-password"
                 onChange={(event) => setNewUserPassword(event.target.value)}
-                placeholder="At least 8 characters"
+                placeholder="Mindestens 8 Zeichen"
                 type="password"
                 value={newUserPassword}
               />
             </Field>
-            <Field htmlFor="new-user-role" label="Role">
+            <Field htmlFor="new-user-role" label="Rolle">
               <Select
                 id="new-user-role"
                 onChange={(event) =>
@@ -2798,19 +2813,19 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                 }
                 value={newUserRole}
               >
-                <option value="member">member</option>
-                <option value="admin">admin</option>
+                <option value="member">Mitglied</option>
+                <option value="admin">Admin</option>
               </Select>
             </Field>
             <Button onClick={createUser} variant="primary">
               <UserPlus size={18} aria-hidden="true" />
-              Add
+              Hinzufügen
             </Button>
           </div>
         </section>
 
         <section className="grid gap-3">
-          <h2 className="m-0 text-h3 font-semibold">Users</h2>
+          <h2 className="m-0 text-h3 font-semibold">Benutzer</h2>
           <div className="divide-y divide-border border-y border-border">
             {users.map((account) => {
               const locked = !account.managed;
@@ -2823,17 +2838,17 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                       <span className="text-body font-medium text-text">
                         {account.name}
                         {account.disabled ? (
-                          <span className="text-text-subtle"> · disabled</span>
+                          <span className="text-text-subtle"> · deaktiviert</span>
                         ) : null}
                       </span>
                       <span className="text-label text-text-subtle">
                         {account.id} · {account.role}
-                        {locked ? " · configured" : ""}
+                        {locked ? " · konfiguriert" : ""}
                       </span>
                     </div>
                     {locked ? (
                       <span className="rounded-full border border-border px-2 py-0.5 text-label text-text-subtle">
-                        Locked
+                        Gesperrt
                       </span>
                     ) : (
                       <div className="flex flex-wrap items-center gap-2">
@@ -2849,8 +2864,8 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                           }
                           value={account.role}
                         >
-                          <option value="member">member</option>
-                          <option value="admin">admin</option>
+                          <option value="member">Mitglied</option>
+                          <option value="admin">Admin</option>
                         </Select>
                         <Button
                           disabled={isSelf}
@@ -2858,18 +2873,18 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                             patchUser(
                               account.id,
                               { disabled: !account.disabled },
-                              account.disabled ? "User enabled" : "User disabled"
+                              account.disabled ? "Benutzer aktiviert" : "Benutzer deaktiviert"
                             )
                           }
                           variant="ghost"
                         >
-                          {account.disabled ? "Enable" : "Disable"}
+                          {account.disabled ? "Aktivieren" : "Deaktivieren"}
                         </Button>
                         <Button
                           onClick={() => renameUser(account.id, account.name)}
                           variant="ghost"
                         >
-                          Rename
+                          Umbenennen
                         </Button>
                         <Button
                           aria-label={`Remove ${account.name}`}
@@ -2893,7 +2908,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                             [account.id]: event.target.value
                           }))
                         }
-                        placeholder="New password"
+                        placeholder="Neues Passwort"
                         type="password"
                         value={editingPasswords[account.id] || ""}
                       />
@@ -2902,7 +2917,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                         variant="secondary"
                       >
                         <KeyRound size={17} aria-hidden="true" />
-                        Reset
+                        Zurücksetzen
                       </Button>
                     </div>
                   )}
@@ -2913,15 +2928,15 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         </section>
 
         <section className="grid gap-3">
-          <h2 className="m-0 text-h3 font-semibold">Data</h2>
+          <h2 className="m-0 text-h3 font-semibold">Daten</h2>
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={exportState} variant="secondary">
               <Download size={18} aria-hidden="true" />
-              Export state
+              Status exportieren
             </Button>
             <label className="inline-flex h-control cursor-pointer items-center gap-2 rounded border border-border bg-surface px-4 text-body-sm font-medium text-text transition-colors hover:bg-surface-muted">
               <Import size={18} aria-hidden="true" />
-              Import my progress
+              Fortschritt importieren
               <input
                 accept="application/json"
                 className="hidden"
@@ -2930,7 +2945,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
 
                   if (file) {
                     importState(file).catch((error) =>
-                      setNotice(error instanceof Error ? error.message : "Import failed")
+                      setNotice(error instanceof Error ? error.message : "Import fehlgeschlagen")
                     );
                   }
                 }}
@@ -2942,7 +2957,8 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
 
         <section className="grid gap-3">
           <h2 className="m-0 text-h3 font-semibold">
-            {openReports.length} open {openReports.length === 1 ? "report" : "reports"}
+            {openReports.length} offene{" "}
+            {openReports.length === 1 ? "Meldung" : "Meldungen"}
           </h2>
           {reports.length ? (
             <List>
@@ -2957,7 +2973,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                         onClick={() => resolveReport(report.id)}
                         variant="ghost"
                       >
-                        Resolve
+                        Erledigt
                       </Button>
                     }
                     detail={report.text}
@@ -2976,7 +2992,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             </List>
           ) : (
             <p className="m-0 border-y border-border py-4 text-body text-text-muted">
-              No reports yet.
+              Noch keine Meldungen.
             </p>
           )}
         </section>
@@ -3027,7 +3043,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               }}
               value={selectedSemester}
             >
-              <option value="all">All semesters</option>
+              <option value="all">Alle Semester</option>
               {semesters.map((semester) => (
                 <option key={semester.key} value={semester.key}>
                   {semester.label}
@@ -3035,7 +3051,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               ))}
             </Select>
           </Field>
-          <Field htmlFor="builder-subject" label="Subject">
+          <Field htmlFor="builder-subject" label="Fach">
             <Select
               id="builder-subject"
               onChange={(event) => {
@@ -3044,7 +3060,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               }}
               value={selectedSubject}
             >
-              <option value="all">All subjects</option>
+              <option value="all">Alle Fächer</option>
               {subjects.map((subject) => (
                 <option key={subject} value={subject}>
                   {subject}
@@ -3052,13 +3068,13 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               ))}
             </Select>
           </Field>
-          <Field htmlFor="builder-topic" label="Topic / exam">
+          <Field htmlFor="builder-topic" label="Thema / Klausur">
             <Select
               id="builder-topic"
               onChange={(event) => setSelectedTopic(event.target.value)}
               value={selectedTopic}
             >
-              <option value="all">All topics</option>
+              <option value="all">Alle Themen</option>
               {topics.map((topic) => (
                 <option key={topic} value={topic}>
                   {topic}
@@ -3066,11 +3082,11 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               ))}
             </Select>
           </Field>
-          <Field htmlFor="builder-search" label="Search inside session">
+          <Field htmlFor="builder-search" label="In Sitzung suchen">
             <Input
               id="builder-search"
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Optional filter"
+              placeholder="Optionaler Filter"
               value={query}
             />
           </Field>
@@ -3078,25 +3094,25 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
-            <span className="text-body-sm font-medium text-text">Mode</span>
+            <span className="text-body-sm font-medium text-text">Modus</span>
             {renderSegmented(
               [
-                ["study", "Study"],
-                ["exam", "Exam"],
-                ["review", "Review"]
+                ["study", "Lernen"],
+                ["exam", "Prüfung"],
+                ["review", "Wiederholung"]
               ] as const,
               mode,
               setMode
             )}
           </div>
           <div className="grid gap-2">
-            <span className="text-body-sm font-medium text-text">Pool</span>
+            <span className="text-body-sm font-medium text-text">Auswahl</span>
             {renderSegmented(
               [
-                ["all", "All"],
-                ["unanswered", "New"],
-                ["wrong", "Wrong"],
-                ["bookmarked", "Saved"]
+                ["all", "Alle"],
+                ["unanswered", "Neu"],
+                ["wrong", "Falsch"],
+                ["bookmarked", "Gespeichert"]
               ] as const,
               pool,
               setPool
@@ -3105,7 +3121,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field htmlFor="builder-count" label="Count">
+          <Field htmlFor="builder-count" label="Anzahl">
             <Input
               id="builder-count"
               max={500}
@@ -3115,16 +3131,16 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               value={sessionCount}
             />
           </Field>
-          <Field htmlFor="builder-order" label="Order">
+          <Field htmlFor="builder-order" label="Reihenfolge">
             <Select
               id="builder-order"
               onChange={(event) => setSessionOrder(event.target.value as SessionOrder)}
               value={sessionOrder}
             >
-              <option value="latest">Newest exam</option>
-              <option value="oldest">Oldest exam</option>
-              <option value="subject">By subject</option>
-              <option value="random">Shuffle</option>
+              <option value="latest">Neueste Klausur</option>
+              <option value="oldest">Älteste Klausur</option>
+              <option value="subject">Nach Fach</option>
+              <option value="random">Zufällig</option>
             </Select>
           </Field>
         </div>
@@ -3137,7 +3153,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             variant="primary"
           >
             <Play size={18} aria-hidden="true" />
-            <span>Start {startCount}</span>
+            <span>{startCount} starten</span>
           </Button>
         </div>
       </div>
@@ -3147,13 +3163,12 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
 
 function titleForView(view: View) {
   const titles: Record<View, string> = {
-    dashboard: "Dashboard",
-    subjects: "Papers",
-    trainer: "Trainer",
-    search: "Search",
-    sessions: "Sessions",
-    mistakes: "Mistakes",
-    bookmarks: "Bookmarks",
+    dashboard: "Übersicht",
+    subjects: "Klausuren",
+    trainer: "Sitzungen",
+    search: "Suche",
+    mistakes: "Fehler",
+    bookmarks: "Lesezeichen",
     admin: "Admin"
   };
 
@@ -3164,9 +3179,9 @@ function renderEmptyQuestion() {
   return (
     <div className="grid justify-items-start gap-2 border-y border-border py-8">
       <ClipboardList className="text-text-subtle" size={28} aria-hidden="true" />
-      <h2 className="m-0 text-h3 font-semibold">No matching questions</h2>
+      <h2 className="m-0 text-h3 font-semibold">Keine passenden Fragen</h2>
       <p className="m-0 text-body text-text-muted">
-        Adjust filters or start a broader session.
+        Passe die Filter an oder starte eine breitere Sitzung.
       </p>
     </div>
   );

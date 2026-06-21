@@ -17,6 +17,8 @@ type PapersViewProps = {
   onStartPaper: (paper: PaperSummary, mode: "study" | "exam") => void;
   onStartPapers: (papers: PaperSummary[], mode: "study" | "exam") => void;
   customSessionBuilder: ReactNode;
+  tab: "papers" | "custom";
+  onTabChange: (tab: "papers" | "custom") => void;
   t: Translate;
 };
 
@@ -58,11 +60,12 @@ export default function PapersView({
   onStartPaper,
   onStartPapers,
   customSessionBuilder,
+  tab,
+  onTabChange,
   t
 }: PapersViewProps) {
   const [openSubjectKey, setOpenSubjectKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [tab, setTab] = useState<"papers" | "custom">("papers");
 
   const papersByKey = useMemo(() => {
     const map = new Map<string, PaperSummary>();
@@ -135,7 +138,7 @@ export default function PapersView({
             <Button
               aria-pressed={tab === "papers"}
               className={tab === "papers" ? "bg-surface-muted text-text" : ""}
-              onClick={() => setTab("papers")}
+              onClick={() => onTabChange("papers")}
               variant={tab === "papers" ? "secondary" : "ghost"}
             >
               {t("nav.subjects")}
@@ -143,7 +146,7 @@ export default function PapersView({
             <Button
               aria-pressed={tab === "custom"}
               className={tab === "custom" ? "bg-surface-muted text-text" : ""}
-              onClick={() => setTab("custom")}
+              onClick={() => onTabChange("custom")}
               variant={tab === "custom" ? "secondary" : "ghost"}
             >
               {t("papers.custom")}

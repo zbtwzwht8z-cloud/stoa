@@ -1,8 +1,8 @@
 "use client";
 
 import { LockKeyhole } from "lucide-react";
-import { Button, Field, Input, cn } from "@/components/ui";
-import type { Lang, Translate } from "@/lib/i18n";
+import { Button, Field, Input } from "@/components/ui";
+import type { Translate } from "@/lib/i18n";
 import type { QuestionMetrics } from "@/lib/types";
 
 type StoaLandingProps = {
@@ -11,8 +11,6 @@ type StoaLandingProps = {
   loginPassword: string;
   authError: string;
   devLogin: null | { username: string; password: string };
-  lang: Lang;
-  onLangChange: (lang: Lang) => void;
   t: Translate;
   onLoginNameChange: (value: string) => void;
   onLoginPasswordChange: (value: string) => void;
@@ -20,7 +18,7 @@ type StoaLandingProps = {
 };
 
 function formatNumber(value: number) {
-  return new Intl.NumberFormat("en-US").format(value);
+  return new Intl.NumberFormat("de-DE").format(value);
 }
 
 export default function StoaLanding({
@@ -29,8 +27,6 @@ export default function StoaLanding({
   loginPassword,
   authError,
   devLogin,
-  lang,
-  onLangChange,
   t,
   onLoginNameChange,
   onLoginPasswordChange,
@@ -46,27 +42,6 @@ export default function StoaLanding({
             "radial-gradient(circle at 12% 8%, color-mix(in srgb, var(--accent) 16%, transparent) 0%, transparent 42%), radial-gradient(circle at 88% 92%, color-mix(in srgb, var(--accent) 12%, transparent) 0%, transparent 38%)"
         }}
       />
-
-      <div
-        aria-label="Language"
-        className="absolute right-6 top-6 flex rounded border border-border bg-surface p-1"
-        role="group"
-      >
-        {(["en", "de"] as const).map((option) => (
-          <Button
-            aria-pressed={lang === option}
-            className={cn(
-              "px-3 uppercase",
-              lang === option && "bg-surface-muted text-text"
-            )}
-            key={option}
-            onClick={() => onLangChange(option)}
-            variant={lang === option ? "secondary" : "ghost"}
-          >
-            {option}
-          </Button>
-        ))}
-      </div>
 
       <div className="w-full max-w-sm">
         <div className="mb-8 grid gap-1">
@@ -104,7 +79,7 @@ export default function StoaLanding({
           ) : null}
           {devLogin ? (
             <p className="m-0 text-label text-text-subtle">
-              Local dev: {devLogin.username} / {devLogin.password}
+              Lokale Entwicklung: {devLogin.username} / {devLogin.password}
             </p>
           ) : null}
 
@@ -115,8 +90,8 @@ export default function StoaLanding({
         </form>
 
         <p className="m-0 mt-6 text-center text-label text-text-subtle">
-          {formatNumber(questionMetrics.questions)} questions · {questionMetrics.subjects}{" "}
-          subjects
+          {formatNumber(questionMetrics.questions)} Fragen · {questionMetrics.subjects}{" "}
+          Fächer
         </p>
       </div>
     </main>

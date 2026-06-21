@@ -1,69 +1,19 @@
-// Lightweight UI translation layer. Core chrome only (nav, titles, buttons,
-// dashboard, papers, login). Question content stays in its original German.
+// German-only UI text. The app ships in German exclusively; the translator
+// keeps a t() API so call sites stay unchanged, but there is only one dict.
+// Question content is already German.
 
-export type Lang = "en" | "de";
+export type Lang = "de";
 
-export const LANGS: Lang[] = ["en", "de"];
+export const LANGS: Lang[] = ["de"];
 
 export const LANG_STORAGE_KEY = "stoa-lang";
 
 type Dict = Record<string, string>;
 
-const en: Dict = {
-  "nav.dashboard": "Dashboard",
-  "nav.subjects": "Papers",
-  "nav.trainer": "Trainer",
-  "nav.sessions": "Sessions",
-  "nav.search": "Search",
-  "nav.mistakes": "Mistakes",
-  "nav.bookmarks": "Bookmarks",
-  "nav.admin": "Admin",
-
-  "common.logout": "Log out",
-  "common.signin": "Sign in",
-  "common.clear": "Clear",
-  "common.cancel": "Cancel",
-
-  "dashboard.start": "Start a session",
-  "dashboard.custom": "Custom session",
-  "dashboard.review": "Review mistakes",
-  "dashboard.papers": "Papers",
-  "dashboard.recent": "Recent sessions",
-  "dashboard.week": "This week",
-
-  "stat.answered": "Answered",
-  "stat.accuracy": "Accuracy",
-  "stat.mistakes": "Mistakes",
-  "stat.coverage": "Coverage",
-
-  "papers.intro":
-    "Pick a semester, open a subject, then start one paper — or tick several papers and run them together.",
-  "papers.study": "Study",
-  "papers.exam": "Exam",
-  "papers.semester": "Semester",
-  "papers.notStarted": "Not started",
-  "papers.solved": "Solved",
-  "papers.latestScore": "Latest score",
-  "papers.startPapers": "Start",
-  "papers.selected": "selected",
-  "papers.custom": "Custom session",
-
-  "unit.question": "question",
-  "unit.questions": "questions",
-  "unit.paper": "paper",
-  "unit.papers": "papers",
-  "unit.subject": "subject",
-  "unit.subjects": "subjects",
-
-  "login.subtitle": "Private exam trainer. Sign in to continue.",
-  "login.username": "Username",
-  "login.password": "Password"
-};
-
 const de: Dict = {
   "nav.dashboard": "Übersicht",
   "nav.subjects": "Klausuren",
-  "nav.trainer": "Trainer",
+  "nav.trainer": "Sitzungen",
   "nav.sessions": "Sitzungen",
   "nav.search": "Suche",
   "nav.mistakes": "Fehler",
@@ -111,10 +61,8 @@ const de: Dict = {
   "login.password": "Passwort"
 };
 
-const dicts: Record<Lang, Dict> = { en, de };
-
 export type Translate = (key: string) => string;
 
-export function createTranslator(lang: Lang): Translate {
-  return (key) => dicts[lang][key] ?? dicts.en[key] ?? key;
+export function createTranslator(_lang?: Lang): Translate {
+  return (key) => de[key] ?? key;
 }

@@ -91,6 +91,9 @@ export type StudySessionLog = {
   mistakeQuestionIds?: string[];
   startedAt: string;
   finishedAt: string;
+  // Explicitly closed by the user (or by submitting/finishing). A session is
+  // resumable only while it is not closed and has unanswered questions.
+  closed?: boolean;
   source?: SessionSource;
 };
 
