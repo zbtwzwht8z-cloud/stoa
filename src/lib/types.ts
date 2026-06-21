@@ -42,6 +42,16 @@ export type QuestionMetrics = {
   images: number;
 };
 
+// Lightweight metadata for the Papers/Dashboard views. The full stem/choices/
+// explanation/notes are fetched separately (or via the full bank in background).
+export type QuestionIndex = {
+  id: string;
+  subject: string;
+  topic: string;
+  source?: string;
+  kind?: QuestionKind;
+};
+
 export type StoredAnswer = {
   // For freeText questions, "answering" means revealing the model answer:
   // selected/correct are omitted, only the interaction (attempts/answeredAt)
@@ -111,6 +121,7 @@ export type PaperSummary = {
   answered: number;
   solved: boolean;
   latestScore: number | null;
+  recentScores: number[];
 };
 
 // A subject within a study semester, aggregating all of its exam-term papers.
@@ -123,6 +134,7 @@ export type SubjectSummary = {
   answered: number;
   solved: boolean;
   latestScore: number | null;
+  recentScores: number[];
   papers: PaperSummary[];
 };
 

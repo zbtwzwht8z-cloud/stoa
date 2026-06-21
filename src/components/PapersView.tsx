@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Play } from "lucide-react";
 
-import { Button, Select } from "@/components/ui";
+import { Button, Segmented, Select } from "@/components/ui";
 import type { Translate } from "@/lib/i18n";
 import type { PaperSummary, SemesterGroup, SubjectSummary } from "@/lib/types";
 
@@ -38,6 +38,32 @@ function progressLabel({ answered, solved, total }: Progress, t: Translate) {
 
 function scoreLabel(score: number | null) {
   return score === null ? "—" : `${Math.round(score)}%`;
+}
+
+function ScoreHistory({ scores }: { scores: number[] }) {
+  if (!scores.length) {
+    return <span className="tabular-nums text-text-subtle">—</span>;
+  }
+
+  return (
+    <span className="flex items-center gap-1 tabular-nums">
+      {scores.map((score, index) => (
+        <span
+          className={
+            index === 0
+              ? "font-medium text-text"
+              : "text-text-subtle"
+          }
+          key={index}
+        >
+          {Math.round(score)}%
+          {index < scores.length - 1 ? (
+            <span className="ml-1 text-text-subtle">·</span>
+          ) : null}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 function countLabel(
@@ -133,25 +159,16 @@ export default function PapersView({
       <section className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-6">
         <p className="m-0 max-w-[720px] text-body text-text-muted">{t("papers.intro")}</p>
 
-        <div aria-label="Klausuren view" className="flex" role="group">
-          <div className="flex rounded border border-border bg-surface p-1">
-            <Button
-              aria-pressed={tab === "papers"}
-              className={tab === "papers" ? "bg-surface-muted text-text" : ""}
-              onClick={() => onTabChange("papers")}
-              variant={tab === "papers" ? "secondary" : "ghost"}
-            >
-              {t("nav.subjects")}
-            </Button>
-            <Button
-              aria-pressed={tab === "custom"}
-              className={tab === "custom" ? "bg-surface-muted text-text" : ""}
-              onClick={() => onTabChange("custom")}
-              variant={tab === "custom" ? "secondary" : "ghost"}
-            >
-              {t("papers.custom")}
-            </Button>
-          </div>
+        <div aria-label="Klausuren view" className="flex">
+          <Segmented
+            ariaLabel="Ansicht"
+            onChange={onTabChange}
+            options={[
+              ["papers", t("nav.subjects")],
+              ["custom", t("papers.custom")]
+            ] as const}
+            value={tab}
+          />
         </div>
       </section>
 
@@ -159,25 +176,16 @@ export default function PapersView({
         customSessionBuilder
       ) : (
         <>
-          <div aria-label="Paper mode" className="flex justify-end" role="group">
-            <div className="flex rounded border border-border bg-surface p-1">
-              <Button
-                aria-pressed={mode === "study"}
-                className={mode === "study" ? "bg-surface-muted text-text" : ""}
-                onClick={() => onModeChange("study")}
-                variant={mode === "study" ? "secondary" : "ghost"}
-              >
-                {t("papers.study")}
-              </Button>
-              <Button
-                aria-pressed={mode === "exam"}
-                className={mode === "exam" ? "bg-surface-muted text-text" : ""}
-                onClick={() => onModeChange("exam")}
-                variant={mode === "exam" ? "secondary" : "ghost"}
-              >
-                {t("papers.exam")}
-              </Button>
-            </div>
+          <div className="flex justify-end">
+            <Segmented
+              ariaLabel="Modus"
+              onChange={onModeChange}
+              options={[
+                ["study", t("papers.study")],
+                ["exam", t("papers.exam")]
+              ] as const}
+              value={mode}
+            />
           </div>
 
           <div className="grid gap-2 md:hidden">
@@ -334,8 +342,8 @@ function SubjectList({
                     <span>{countLabel(subject.total, "question", t)}</span>
                     <span>{countLabel(subject.papers.length, "paper", t)}</span>
                     <span>{progressLabel(subject, t)}</span>
-                    <span>
-                      {t("papers.latestScore")} {scoreLabel(subject.latestScore)}
+                    <span className="flex items-center gap-1">
+                      {t("papers.latestScore")} <ScoreHistory scores={subject.recentScores} />
                     </span>
                   </span>
                 </button>
@@ -418,8 +426,8 @@ function SubjectPapers({
                 <span className="flex flex-wrap items-center gap-x-4 gap-y-1 text-body-sm text-text-muted">
                   <span>{countLabel(paper.total, "question", t)}</span>
                   <span>{progressLabel(paper, t)}</span>
-                  <span>
-                    {t("papers.latestScore")} {scoreLabel(paper.latestScore)}
+                  <span className="flex items-center gap-1">
+                    {t("papers.latestScore")} <ScoreHistory scores={paper.recentScores} />
                   </span>
                 </span>
               </div>

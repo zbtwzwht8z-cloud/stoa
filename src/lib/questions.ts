@@ -1,5 +1,5 @@
 import rawQuestions from "../../data/questions.json";
-import type { Question } from "./types";
+import type { Question, QuestionIndex } from "./types";
 
 function assertQuestion(question: Question, index: number) {
   const prefix = `Question ${index + 1}`;
@@ -39,3 +39,13 @@ export const questions = (rawQuestions as Question[]).map((question, index) => {
     tags: question.tags || []
   };
 });
+
+// Lightweight index: enough for Papers/Dashboard (semester grouping, paper keys,
+// question counts) without the 18 MB of stems/choices/explanations/notes.
+export const questionIndex: QuestionIndex[] = questions.map((question) => ({
+  id: question.id,
+  subject: question.subject,
+  topic: question.topic,
+  source: question.source,
+  kind: question.kind
+}));

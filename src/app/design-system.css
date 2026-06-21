@@ -13,4 +13,6 @@
   --accent: #216e62;
   --accent-foreground: #ffffff;
   --danger: #a33a36;
+  --highlight: #f1d77a;
+  --highlight-soft: rgba(241, 215, 122, 0.45);
 }

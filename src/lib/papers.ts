@@ -63,16 +63,7 @@ export function sessionMatchesPaper(
   session: StudySessionLog,
   paper: Pick<PaperSummary, "key" | "questionIds">
 ) {
-  if (session.source?.paperKey) {
-    return session.source.paperKey === paper.key;
-  }
-
-  if (!session.questionIds.length) {
-    return false;
-  }
-
-  const paperQuestionIds = new Set(paper.questionIds);
-  return session.questionIds.every((questionId) => paperQuestionIds.has(questionId));
+  return session.source?.paperKey === paper.key;
 }
 
 function scoreFor(session: StudySessionLog | null) {
@@ -111,31 +102,34 @@ export function latestCompletedPaperSession(
   return latest;
 }
 
-// Newest completed score across any of a subject's papers.
-function latestSubjectScore(
+// Up to 3 most recent completed-session scores for a paper, newest first.
+export function recentPaperScores(
+  paper: Pick<PaperSummary, "key" | "questionIds">,
+  sessions: StudySessionLog[] = []
+) {
+  return sessions
+    .filter(
+      (session) => isCompletedSession(session) && sessionMatchesPaper(session, paper)
+    )
+    .sort((left, right) => sessionTime(right) - sessionTime(left))
+    .slice(0, 3)
+    .map((session) => scoreFor(session) ?? 0);
+}
+
+// Up to 3 most recent completed-session scores across a subject's papers.
+function recentSubjectScores(
   papers: PaperSummary[],
   sessions: StudySessionLog[] = []
 ) {
-  let latest: StudySessionLog | null = null;
-  let latestTime = Number.NEGATIVE_INFINITY;
-
-  for (const session of sessions) {
-    if (
-      !isCompletedSession(session) ||
-      !papers.some((paper) => sessionMatchesPaper(session, paper))
-    ) {
-      continue;
-    }
-
-    const time = sessionTime(session);
-
-    if (!latest || time > latestTime) {
-      latest = session;
-      latestTime = time;
-    }
-  }
-
-  return scoreFor(latest);
+  return sessions
+    .filter(
+      (session) =>
+        isCompletedSession(session) &&
+        papers.some((paper) => sessionMatchesPaper(session, paper))
+    )
+    .sort((left, right) => sessionTime(right) - sessionTime(left))
+    .slice(0, 3)
+    .map((session) => scoreFor(session) ?? 0);
 }
 
 // Groups the whole bank into study semester -> subject -> exam-term paper, with
@@ -191,7 +185,8 @@ export function buildCurriculum(
       total,
       answered,
       solved: total > 0 && answered === total,
-      latestScore: scoreFor(latestCompletedPaperSession(raw, sessions))
+      latestScore: scoreFor(latestCompletedPaperSession(raw, sessions)),
+      recentScores: recentPaperScores(raw, sessions)
     };
 
     const subjectKey = `${semester.key}::${raw.subject.toLocaleLowerCase("de")}`;
@@ -211,6 +206,7 @@ export function buildCurriculum(
         answered,
         solved: false,
         latestScore: null,
+        recentScores: [],
         papers: [paper]
       });
     }
@@ -225,7 +221,8 @@ export function buildCurriculum(
         right.examTermSort - left.examTermSort ||
         left.examTerm.localeCompare(right.examTerm, "de")
     );
-    subject.latestScore = latestSubjectScore(subject.papers, sessions);
+    subject.latestScore = subject.recentScores[0] ?? null;
+    subject.recentScores = recentSubjectScores(subject.papers, sessions);
 
     const group = semesters.get(subject.semesterKey);
 

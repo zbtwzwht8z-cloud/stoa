@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import type { QuestionReport } from "@/lib/types";
 import { readSession } from "@/lib/server/auth";
-import { readState, updateState } from "@/lib/server/store";
+import { readReports, updateReports } from "@/lib/server/store";
 
 function id() {
   return `report-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -15,13 +15,13 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const state = await readState();
-  const reports =
+  const reports = await readReports();
+  const visible =
     user.role === "admin"
-      ? state.reports
-      : state.reports.filter((report) => report.userId === user.id);
+      ? reports
+      : reports.filter((report) => report.userId === user.id);
 
-  return NextResponse.json({ reports });
+  return NextResponse.json({ reports: visible });
 }
 
 export async function POST(request: Request) {
@@ -50,8 +50,8 @@ export async function POST(request: Request) {
     createdAt: new Date().toISOString()
   };
 
-  await updateState((state) => {
-    state.reports.unshift(report);
+  await updateReports((reports) => {
+    reports.unshift(report);
   });
 
   return NextResponse.json({ report });
@@ -72,8 +72,8 @@ export async function PATCH(request: Request) {
 
   let updated: QuestionReport | null = null;
 
-  await updateState((state) => {
-    const report = state.reports.find((item) => item.id === body.id);
+  await updateReports((reports) => {
+    const report = reports.find((item) => item.id === body.id);
 
     if (!report) {
       return;

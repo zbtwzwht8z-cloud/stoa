@@ -151,3 +151,44 @@ export function EmptyState({
     </div>
   );
 }
+
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  ariaLabel
+}: {
+  options: ReadonlyArray<readonly [T, string]>;
+  value: T;
+  onChange: (next: T) => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <div
+      aria-label={ariaLabel}
+      className="flex rounded border border-border bg-surface p-1"
+      role="group"
+    >
+      {options.map(([optionValue, label]) => {
+        const active = value === optionValue;
+
+        return (
+          <button
+            aria-pressed={active}
+            className={cn(
+              "flex-1 rounded px-3 py-1.5 text-body-sm font-medium transition-colors",
+              active
+                ? "bg-surface-muted text-text"
+                : "text-text-muted hover:text-text"
+            )}
+            key={optionValue}
+            onClick={() => onChange(optionValue)}
+            type="button"
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

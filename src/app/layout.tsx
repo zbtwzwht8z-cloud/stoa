@@ -1,11 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./design-system.css";
 
 export const metadata: Metadata = {
   title: "Stoa",
-  description: "The modern digital space for mastering your exams.",
+  description: "Klausurtrainer",
   manifest: "/manifest.webmanifest"
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#216e62"
 };
 
 export default function RootLayout({
@@ -14,7 +21,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="de">
       <body>{children}</body>
     </html>
   );

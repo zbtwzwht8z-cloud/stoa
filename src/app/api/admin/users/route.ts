@@ -4,10 +4,11 @@ import type { ManagedTrainerUser, TrainerUser } from "@/lib/types";
 import {
   getConfiguredUsers,
   getRuntimeUsers,
+  hashPassword,
   readSession,
   type ConfiguredUser
 } from "@/lib/server/auth";
-import { updateState } from "@/lib/server/store";
+import { updateUsers } from "@/lib/server/store";
 
 const MAX_USER_ID_LENGTH = 64;
 const MAX_NAME_LENGTH = 100;
@@ -300,23 +301,24 @@ export async function POST(request: Request) {
   const configuredUsers = getConfiguredUsers();
   const newUser: ManagedTrainerUser = {
     ...input,
+    password: hashPassword(input.password),
     disabled: false,
     managed: true,
     createdAt: new Date().toISOString()
   };
 
   const result = await serializeMutation(() =>
-    updateState<MutationResult<ManagedTrainerUser>>((state) => {
+    updateUsers<MutationResult<ManagedTrainerUser>>((users) => {
       const conflict = identityConflict(newUser, [
         ...configuredUsers,
-        ...state.users
+        ...users
       ]);
 
       if (conflict) {
         return mutationError(conflict, 409);
       }
 
-      state.users.push(newUser);
+      users.push(newUser);
 
       return { ok: true, value: newUser };
     })
@@ -357,8 +359,8 @@ export async function PATCH(request: Request) {
   }
 
   const result = await serializeMutation(() =>
-    updateState<MutationResult<ManagedTrainerUser>>((state) => {
-      const targetIndex = state.users.findIndex(
+    updateUsers<MutationResult<ManagedTrainerUser>>((users) => {
+      const targetIndex = users.findIndex(
         (item) => userIdKey(item.id) === input.id
       );
 
@@ -366,7 +368,7 @@ export async function PATCH(request: Request) {
         return mutationError("Managed user not found", 404);
       }
 
-      const target = state.users[targetIndex];
+      const target = users[targetIndex];
       const isCurrentUser = userIdKey(target.id) === userIdKey(user.id);
 
       if (isCurrentUser && input.changes.disabled === true) {
@@ -377,11 +379,15 @@ export async function PATCH(request: Request) {
         return mutationError("You cannot demote your own admin account", 409);
       }
 
+      const changes = input.changes.password
+        ? { ...input.changes, password: hashPassword(input.changes.password) }
+        : input.changes;
+
       const updatedUser: ManagedTrainerUser = {
         ...target,
-        ...input.changes
+        ...changes
       };
-      const otherUsers = state.users.filter((_, index) => index !== targetIndex);
+      const otherUsers = users.filter((_, index) => index !== targetIndex);
       const conflict = identityConflict(updatedUser, [
         ...configuredUsers,
         ...otherUsers
@@ -391,7 +397,7 @@ export async function PATCH(request: Request) {
         return mutationError(conflict, 409);
       }
 
-      const nextUsers = [...state.users];
+      const nextUsers = [...users];
 
       nextUsers[targetIndex] = updatedUser;
 
@@ -399,7 +405,8 @@ export async function PATCH(request: Request) {
         return mutationError("At least one enabled admin account is required", 409);
       }
 
-      state.users = nextUsers;
+      users.length = 0;
+      users.push(...nextUsers);
 
       return { ok: true, value: updatedUser };
     })
@@ -452,8 +459,8 @@ export async function DELETE(request: Request) {
   }
 
   const result = await serializeMutation(() =>
-    updateState<MutationResult<true>>((state) => {
-      const targetIndex = state.users.findIndex(
+    updateUsers<MutationResult<true>>((users) => {
+      const targetIndex = users.findIndex(
         (item) => userIdKey(item.id) === id
       );
 
@@ -461,13 +468,14 @@ export async function DELETE(request: Request) {
         return mutationError("Managed user not found", 404);
       }
 
-      const nextUsers = state.users.filter((_, index) => index !== targetIndex);
+      const nextUsers = users.filter((_, index) => index !== targetIndex);
 
       if (!hasEnabledAdmin(configuredUsers, nextUsers)) {
         return mutationError("At least one enabled admin account is required", 409);
       }
 
-      state.users = nextUsers;
+      users.length = 0;
+      users.push(...nextUsers);
 
       return { ok: true, value: true };
     })

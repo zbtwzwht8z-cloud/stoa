@@ -7,6 +7,6 @@ export {
   CardTitle
 } from "./card";
 export { Input } from "./input";
-export { Checkbox, EmptyState, Field, List, ListRow, NavItem, Stat } from "./patterns";
+export { Checkbox, EmptyState, Field, List, ListRow, NavItem, Segmented, Stat } from "./patterns";
 export { Select } from "./select";
 export { cn } from "./utils";

@@ -33,16 +33,7 @@ export default function StoaLanding({
   onLogin
 }: StoaLandingProps) {
   return (
-    <main className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-bg px-6 py-12 font-sans text-body text-text">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle at 12% 8%, color-mix(in srgb, var(--accent) 16%, transparent) 0%, transparent 42%), radial-gradient(circle at 88% 92%, color-mix(in srgb, var(--accent) 12%, transparent) 0%, transparent 38%)"
-        }}
-      />
-
+    <main className="flex min-h-[100dvh] items-center justify-center bg-bg px-6 py-12 font-sans text-body text-text">
       <div className="w-full max-w-sm">
         <div className="mb-8 grid gap-1">
           <div className="flex items-center gap-2">

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import type { StoredProgress } from "@/lib/types";
 import { readSession } from "@/lib/server/auth";
-import { updateState } from "@/lib/server/store";
+import { writeProgress } from "@/lib/server/store";
 
 export async function POST(request: Request) {
   const user = await readSession(await cookies());
@@ -19,9 +19,7 @@ export async function POST(request: Request) {
 
   body.progress.updatedAt = new Date().toISOString();
 
-  await updateState((state) => {
-    state.progress[user.id] = body.progress as StoredProgress;
-  });
+  await writeProgress(user.id, body.progress);
 
   return NextResponse.json({ progress: body.progress });
 }

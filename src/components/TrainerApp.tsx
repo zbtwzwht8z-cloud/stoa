@@ -23,7 +23,7 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
-  Menu,
+  MoreHorizontal,
   NotebookPen,
   Play,
   RotateCcw,
@@ -44,6 +44,7 @@ import {
   Input,
   List,
   ListRow,
+  Segmented,
   Select,
   Stat,
   cn
@@ -55,11 +56,12 @@ import {
 } from "@/lib/curriculum";
 import { buildCurriculum } from "@/lib/papers";
 import { compareTopicBySemester, questionSemesterKey } from "@/lib/semesters";
-import { createTranslator, type Lang } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import type {
   BookmarkFolder,
   LeaderboardEntry,
   Question,
+  QuestionIndex,
   QuestionMetrics,
   QuestionReport,
   PaperSummary,
@@ -68,7 +70,7 @@ import type {
   StudySessionLog,
   TrainerUser
 } from "@/lib/types";
-import { progressStats, subjectStats } from "@/lib/stats";
+import { progressStats } from "@/lib/stats";
 
 type TrainerAppProps = {
   questionMetrics: QuestionMetrics;
@@ -89,7 +91,6 @@ type ReportType = QuestionReport["type"];
 
 const STORAGE_KEY = "private-mcq-trainer-progress-v2";
 const LEGACY_STORAGE_KEY = "private-mcq-trainer-progress";
-const LOCAL_SW_CLEANUP_KEY = "stoa-local-service-worker-cleaned";
 const DEFAULT_COUNT = 40;
 
 const navItems: Array<{
@@ -105,6 +106,17 @@ const navItems: Array<{
   { view: "mistakes", label: "Fehler", icon: NotebookPen },
   { view: "bookmarks", label: "Lesezeichen", icon: BookMarked },
   { view: "admin", label: "Admin", icon: Shield, admin: true }
+];
+
+const bottomNavItems: Array<{
+  view: View | "more";
+  label: string;
+  icon: typeof LayoutDashboard;
+}> = [
+  { view: "dashboard", label: "Übersicht", icon: LayoutDashboard },
+  { view: "subjects", label: "Klausuren", icon: BookOpenCheck },
+  { view: "trainer", label: "Sitzungen", icon: History },
+  { view: "more", label: "Mehr", icon: MoreHorizontal }
 ];
 
 function now() {
@@ -139,6 +151,23 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+function formatElapsed(ms: number) {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return "0:00";
+  }
+
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -166,7 +195,7 @@ function renderHighlightedText(
     );
 
     return highlighted ? (
-      <mark className="bg-[#f1d77a] text-text" key={`${part}-${index}`}>
+      <mark className="bg-highlight text-text" key={`${part}-${index}`}>
         {part}
       </mark>
     ) : onHighlightToken ? (
@@ -174,7 +203,7 @@ function renderHighlightedText(
         {part.split(/(\s+)/).map((token, tokenIndex) =>
           token.trim() ? (
             <span
-              className="cursor-text rounded-sm hover:bg-[#f1d77a]/45"
+              className="cursor-text rounded-sm hover:bg-highlight/45"
               key={`${token}-${tokenIndex}`}
               onClick={(event) => {
                 event.stopPropagation();
@@ -364,11 +393,11 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [questionsReady, setQuestionsReady] = useState(false);
+  const [questionsFullReady, setQuestionsFullReady] = useState(false);
   const [questionsError, setQuestionsError] = useState("");
   const [authChecked, setAuthChecked] = useState(false);
   const [view, setView] = useState<View>("dashboard");
   const [navOpen, setNavOpen] = useState(false);
-  const lang: Lang = "de";
   const [user, setUser] = useState<TrainerUser | null>(null);
   const [users, setUsers] = useState<TrainerUser[]>([]);
   const [devLogin, setDevLogin] = useState<null | { username: string; password: string }>(
@@ -379,11 +408,6 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   const [authError, setAuthError] = useState("");
   const [progress, setProgress] = useState<StoredProgress>(() => loadLocalProgress());
   const [ready, setReady] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<"local" | "syncing" | "synced" | "offline">(
-    "local"
-  );
-  const [online, setOnline] = useState(true);
-  const [offlineReady, setOfflineReady] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [reports, setReports] = useState<QuestionReport[]>([]);
   const [adminState, setAdminState] = useState<null | {
@@ -426,6 +450,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   const [notice, setNotice] = useState("");
   const [queueOpen, setQueueOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [examSubmitOpen, setExamSubmitOpen] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stemRef = useRef<HTMLDivElement>(null);
   const questionContentRef = useRef<HTMLElement>(null);
@@ -439,7 +467,6 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     () => new Map(questions.map((question) => [question.id, question])),
     [questions]
   );
-  const t = useMemo(() => createTranslator(lang), [lang]);
   const semesters = useMemo(() => {
     const present = new Set(
       questions.map((question) => semesterForSubject(question.subject).key)
@@ -481,10 +508,6 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     [semesterQuestions, selectedSubject]
   );
   const stats = useMemo(() => progressStats(progress, questions), [progress, questions]);
-  const subjectsSummary = useMemo(
-    () => subjectStats(progress, semesterQuestions),
-    [progress, semesterQuestions]
-  );
   const folders = progress.bookmarkFolders || [defaultFolder()];
   const activeFolder =
     folders.find((folder) => folder.id === progress.activeFolderId) || folders[0];
@@ -590,58 +613,6 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   }, [selectedSubject, subjects]);
 
   useEffect(() => {
-    const updateOnline = () => setOnline(navigator.onLine);
-
-    setOnline(navigator.onLine);
-    window.addEventListener("online", updateOnline);
-    window.addEventListener("offline", updateOnline);
-
-    if ("serviceWorker" in navigator) {
-      const isLocalhost = ["localhost", "127.0.0.1"].includes(
-        window.location.hostname
-      );
-
-      if (isLocalhost) {
-        const clearLocalWorker = async () => {
-          const registrations = await navigator.serviceWorker.getRegistrations();
-
-          await Promise.all(
-            registrations.map((registration) => registration.unregister())
-          );
-
-          if ("caches" in window) {
-            const cacheKeys = await caches.keys();
-            await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
-          }
-
-          setOfflineReady(false);
-
-          if (
-            navigator.serviceWorker.controller &&
-            !window.sessionStorage.getItem(LOCAL_SW_CLEANUP_KEY)
-          ) {
-            window.sessionStorage.setItem(LOCAL_SW_CLEANUP_KEY, "true");
-            window.location.reload();
-          }
-        };
-
-        clearLocalWorker().catch(() => setOfflineReady(false));
-      } else {
-        window.sessionStorage.removeItem(LOCAL_SW_CLEANUP_KEY);
-        navigator.serviceWorker
-          .register("/sw.js")
-          .then(() => setOfflineReady(true))
-          .catch(() => setOfflineReady(false));
-      }
-    }
-
-    return () => {
-      window.removeEventListener("online", updateOnline);
-      window.removeEventListener("offline", updateOnline);
-    };
-  }, []);
-
-  useEffect(() => {
     jsonFetch<{
       user: TrainerUser | null;
       users: TrainerUser[];
@@ -668,11 +639,12 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     if (!user) {
       setQuestions([]);
       setQuestionsReady(false);
+      setQuestionsFullReady(false);
       setQuestionsError("");
       return;
     }
 
-    void loadQuestions();
+    void loadQuestionIndex();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -680,6 +652,9 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
   }, [progress]);
 
+  // Debounced server sync: flush progress after the user stops answering for a
+  // moment instead of firing a POST on every keystroke/answer. Also skipped
+  // while a session is actively in focus (the user navigates away or pauses).
   useEffect(() => {
     if (!ready || !user) {
       return;
@@ -690,17 +665,13 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     }
 
     syncTimer.current = setTimeout(() => {
-      setSyncStatus("syncing");
       jsonFetch<{ progress: StoredProgress }>("/api/progress", {
         method: "POST",
         body: JSON.stringify({ progress })
       })
-        .then(() => {
-          setSyncStatus("synced");
-          refreshLeaderboard();
-        })
-        .catch(() => setSyncStatus("offline"));
-    }, 650);
+        .then(() => refreshLeaderboard())
+        .catch(() => undefined);
+    }, 2000);
 
     return () => {
       if (syncTimer.current) {
@@ -737,28 +708,59 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     try {
       const data = await jsonFetch<{ progress: StoredProgress }>("/api/progress");
       setProgress(normalizeProgress(data.progress));
-      setSyncStatus("synced");
     } catch {
       setProgress(loadLocalProgress());
-      setSyncStatus("offline");
     } finally {
       setReady(true);
     }
   }
 
-  async function loadQuestions() {
+  // Fetch the lightweight index first so Papers/Dashboard render immediately,
+  // then load the full 18 MB bank in the background for search/trainer/mistakes.
+  async function loadQuestionIndex() {
     setQuestionsReady(false);
     setQuestionsError("");
 
     try {
-      const data = await jsonFetch<{ questions: Question[] }>("/api/questions");
-      setQuestions(data.questions);
+      const data = await jsonFetch<{ index: QuestionIndex[] }>(
+        "/api/questions?index=true"
+      );
+      // Map index entries to minimal Question objects so buildCurriculum and
+      // paper grouping work without the full content.
+      setQuestions(
+        data.index.map((entry) => ({
+          id: entry.id,
+          subject: entry.subject,
+          topic: entry.topic,
+          source: entry.source,
+          kind: entry.kind,
+          stem: "",
+          choices: [],
+          answer: ""
+        }))
+      );
     } catch (error) {
       setQuestionsError(
         error instanceof Error ? error.message : "Fragen konnten nicht geladen werden"
       );
     } finally {
       setQuestionsReady(true);
+    }
+
+    void loadFullQuestions();
+  }
+
+  async function loadFullQuestions() {
+    setQuestionsFullReady(false);
+
+    try {
+      const data = await jsonFetch<{ questions: Question[] }>("/api/questions");
+      setQuestions(data.questions);
+    } catch {
+      // Index is enough for Papers; full bank errors surface when the user
+      // tries to start a session.
+    } finally {
+      setQuestionsFullReady(true);
     }
   }
 
@@ -1087,6 +1089,48 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     document.documentElement.lang = "de";
   }, []);
 
+  // Timer: tick every second while an exam session is active.
+  useEffect(() => {
+    if (view !== "trainer" || mode !== "exam" || examFinished || !sessionIds.length) {
+      return;
+    }
+
+    const interval = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [view, mode, examFinished, sessionIds.length]);
+
+  // Global shortcuts: Cmd/Ctrl+K opens command palette, ? shows help.
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+
+      if (
+        target &&
+        ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
+      ) {
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandOpen((current) => !current);
+        return;
+      }
+
+      if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        setHelpOpen((current) => !current);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [user]);
+
   function endSession() {
     setSessionIds([]);
     setActiveSessionLogId(null);
@@ -1100,6 +1144,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     setStudyFinished(false);
     setQueueOpen(false);
     setReportOpen(false);
+    setExamSubmitOpen(false);
   }
 
   function patchProgress(updater: (current: StoredProgress) => StoredProgress) {
@@ -1169,6 +1214,11 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     label: string,
     source?: StudySessionLog["source"]
   ) {
+    if (!questionsFullReady) {
+      setNotice("Fragen werden noch geladen — kurz warten.");
+      return;
+    }
+
     const sessionId = id("session");
     const startedAt = now();
 
@@ -1202,7 +1252,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           source
         },
         ...(current.sessionLog || [])
-      ].slice(0, 80)
+      ].slice(0, 500)
     }));
   }
 
@@ -1439,7 +1489,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
 
         return {
           ...nextProgress,
-          sessionLog: [log, ...sessionLog].slice(0, 80)
+          sessionLog: [log, ...sessionLog].slice(0, 500)
         };
       }
 
@@ -1461,27 +1511,6 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     });
 
     setExamFinished(true);
-  }
-
-  function setConfidence(questionId: string, confidence: StoredAnswer["confidence"]) {
-    patchProgress((current) => {
-      const answer = current.answers[questionId];
-
-      if (!answer) {
-        return current;
-      }
-
-      return {
-        ...current,
-        answers: {
-          ...current.answers,
-          [questionId]: {
-            ...answer,
-            confidence
-          }
-        }
-      };
-    });
   }
 
   function toggleBookmark(questionId: string) {
@@ -1648,7 +1677,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   }
 
   function renameUser(userId: string, currentName: string) {
-    const next = window.prompt("New name", currentName);
+    const next = window.prompt("Neuer Name", currentName);
 
     if (next === null) {
       return;
@@ -1681,7 +1710,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   }
 
   async function removeUser(userId: string, name: string) {
-    if (!window.confirm(`Remove ${name}? This cannot be undone.`)) {
+    if (!window.confirm(`${name} entfernen? Dies kann nicht rückgängig gemacht werden.`)) {
       return;
     }
 
@@ -1750,6 +1779,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   }
 
   function jumpToQuestion(questionId: string) {
+    if (!questionsFullReady) {
+      setNotice("Fragen werden noch geladen — kurz warten.");
+      return;
+    }
     setSessionIds([questionId]);
     setActiveIndex(0);
     setMode("study");
@@ -1763,7 +1796,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
       <main className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 bg-bg px-6 font-sans text-body text-text">
         <AlertTriangle className="text-danger" size={28} aria-hidden="true" />
         <p className="m-0 text-body text-text-muted">{questionsError}</p>
-        <Button onClick={loadQuestions} variant="secondary">
+        <Button onClick={loadQuestionIndex} variant="secondary">
           Erneut versuchen
         </Button>
       </main>
@@ -1863,29 +1896,10 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         {sidebarContent}
       </aside>
 
-      {navOpen ? (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div
-            aria-hidden="true"
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setNavOpen(false)}
-          />
-          <aside className="absolute inset-y-0 left-0 flex w-64 max-w-[80%] flex-col gap-6 overflow-y-auto border-r border-border bg-surface p-6">
-            {sidebarContent}
-          </aside>
-        </div>
-      ) : null}
+      {navOpen ? renderMoreSheet() : null}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-bg/90 px-8 py-5 backdrop-blur lg:px-12">
-          <Button
-            aria-label="Navigation öffnen"
-            className="px-2 md:hidden"
-            onClick={() => setNavOpen(true)}
-            variant="ghost"
-          >
-            <Menu size={20} aria-hidden="true" />
-          </Button>
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-bg/90 px-6 py-4 backdrop-blur md:px-8 md:py-5 lg:px-12">
           <h1 className="m-0 text-h2 font-semibold">{titleForView(view)}</h1>
         </header>
 
@@ -1906,7 +1920,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           </div>
         ) : null}
 
-        <div className="min-w-0 flex-1 px-8 py-8 lg:px-12 lg:py-10">
+        <div className="min-w-0 flex-1 px-6 py-6 pb-24 md:px-8 md:py-8 md:pb-8 lg:px-12 lg:py-10">
           {view === "dashboard" ? renderDashboard() : null}
           {view === "subjects" ? renderSubjects() : null}
           {view === "trainer" ? renderTrainer() : null}
@@ -1915,9 +1929,120 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           {view === "bookmarks" ? renderBookmarks() : null}
           {view === "admin" ? renderAdmin() : null}
         </div>
+
+        <nav
+          aria-label="Hauptnavigation"
+          className="sticky bottom-0 z-20 flex items-stretch justify-around border-t border-border bg-surface md:hidden"
+          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        >
+          {bottomNavItems.map((item) => {
+            const Icon = item.icon;
+            const active = view === item.view;
+
+            if (item.view === "more") {
+              return (
+                <button
+                  className="flex flex-1 flex-col items-center gap-0.5 py-2 text-text-muted"
+                  key={item.view}
+                  onClick={() => setNavOpen(true)}
+                  type="button"
+                >
+                  <Icon size={20} aria-hidden="true" />
+                  <span className="text-label">{item.label}</span>
+                </button>
+              );
+            }
+
+            return (
+              <button
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex flex-1 flex-col items-center gap-0.5 py-2",
+                  active ? "text-accent" : "text-text-muted"
+                )}
+                key={item.view}
+                onClick={() => setView(item.view as View)}
+                type="button"
+              >
+                <Icon size={20} aria-hidden="true" />
+                <span className="text-label">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
       </div>
+
+      {helpOpen ? renderKeyboardHelp() : null}
+      {commandOpen ? renderCommandPalette() : null}
     </main>
   );
+
+  function renderMoreSheet() {
+    const secondaryItems = navItems.filter(
+      (item) =>
+        item.view !== "dashboard" &&
+        item.view !== "subjects" &&
+        item.view !== "trainer" &&
+        (!item.admin || user?.role === "admin")
+    );
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-end md:hidden">
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 bg-black/40"
+          onClick={() => setNavOpen(false)}
+        />
+        <section
+          aria-label="Mehr"
+          className="relative grid w-full gap-1 rounded-t border-t border-border bg-surface p-4"
+          style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+        >
+          <div className="flex items-center justify-between pb-2">
+            <strong className="text-body font-medium">{user?.name}</strong>
+            <Button
+              aria-label="Schließen"
+              className="px-2"
+              onClick={() => setNavOpen(false)}
+              variant="ghost"
+            >
+              <X size={18} aria-hidden="true" />
+            </Button>
+          </div>
+          <div className="divide-y divide-border border-y border-border">
+            {secondaryItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  className="flex w-full items-center gap-3 py-3 text-left text-body text-text"
+                  key={item.view}
+                  onClick={() => {
+                    setView(item.view);
+                    setNavOpen(false);
+                  }}
+                  type="button"
+                >
+                  <Icon size={18} aria-hidden="true" />
+                  <span>{t(`nav.${item.view}`)}</span>
+                </button>
+              );
+            })}
+          </div>
+          <Button
+            className="mt-2 justify-start text-danger"
+            onClick={() => {
+              setNavOpen(false);
+              void logout();
+            }}
+            variant="ghost"
+          >
+            <LogOut size={18} aria-hidden="true" />
+            <span>Abmelden</span>
+          </Button>
+        </section>
+      </div>
+    );
+  }
 
   function renderDashboard() {
     const latestMistakeSession = sessionLogs.find(
@@ -2160,14 +2285,20 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {mode === "exam" && !examFinished ? (
+              <span className="flex items-center gap-1.5 rounded border border-border bg-surface px-3 py-1.5 text-body-sm tabular-nums text-text-muted">
+                <Timer size={15} aria-hidden="true" />
+                {formatElapsed(nowTick - Date.parse(sessionStartedAt))}
+              </span>
+            ) : null}
             <Button className="px-3" onClick={() => setQueueOpen(true)} variant="ghost">
               <ListChecks size={18} aria-hidden="true" />
-              <span>Übersicht</span>
+              <span className="hidden sm:inline">Übersicht</span>
             </Button>
             {mode === "exam" && !examFinished ? (
-              <Button onClick={finishExam} variant="primary">
-                <Timer size={16} aria-hidden="true" />
-                Abschließen
+              <Button onClick={() => setExamSubmitOpen(true)} variant="primary">
+                <Check size={16} aria-hidden="true" />
+                Abgeben
               </Button>
             ) : null}
             {mode !== "exam" && !studyFinished ? (
@@ -2209,6 +2340,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         ) : null}
 
         {queueOpen ? renderQueueDrawer() : null}
+        {examSubmitOpen ? renderExamSubmitGate() : null}
       </div>
     );
   }
@@ -2223,6 +2355,53 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     setStudyFinished(true);
   }
 
+  function renderExamSubmitGate() {
+    const answeredCount = Object.keys(examAnswers).length;
+    const unanswered = sessionQuestions.length - answeredCount;
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 bg-black/40"
+          onClick={() => setExamSubmitOpen(false)}
+        />
+        <section
+          aria-label="Prüfung abgeben"
+          className="relative grid w-full max-w-sm gap-4 rounded border border-border bg-surface p-6"
+        >
+          <div className="grid gap-1">
+            <strong className="text-h3 font-semibold">Prüfung abgeben?</strong>
+            <p className="m-0 text-body-sm text-text-muted">
+              {answeredCount} von {sessionQuestions.length} beantwortet
+              {unanswered > 0 ? ` · ${unanswered} offen` : ""}
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button
+              className="flex-1 justify-center"
+              onClick={() => setExamSubmitOpen(false)}
+              variant="secondary"
+            >
+              Abbrechen
+            </Button>
+            <Button
+              className="flex-1 justify-center"
+              onClick={() => {
+                setExamSubmitOpen(false);
+                finishExam();
+              }}
+              variant="primary"
+            >
+              <Check size={16} aria-hidden="true" />
+              Abgeben
+            </Button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   function renderStudyResults() {
     const activeSession = sessionLogs.find(
       (session) => session.id === activeSessionLogId
@@ -2232,16 +2411,67 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     const correct = activeSession?.correct ?? 0;
     const mistakeIds = activeSession?.mistakeQuestionIds || [];
     const accuracy = answered ? Math.round((correct / answered) * 100) : 0;
+    const elapsed = Date.parse(activeSession?.finishedAt || now()) - Date.parse(sessionStartedAt);
+    const isExam = mode === "exam" || activeSession?.mode === "exam";
+
+    // Per-subject breakdown: group session questions by subject and show
+    // correct/total per subject using the recorded exam/study answers.
+    const bySubject = new Map<string, { total: number; correct: number }>();
+    for (const question of sessionQuestions) {
+      const entry = bySubject.get(question.subject) || { total: 0, correct: 0 };
+      entry.total += 1;
+      const selected =
+        mode === "exam"
+          ? examAnswers[question.id]
+          : progress.answers[question.id]?.selected;
+      if (selected && selected === question.answer) {
+        entry.correct += 1;
+      }
+      bySubject.set(question.subject, entry);
+    }
+    const breakdown = Array.from(bySubject.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0], "de")
+    );
 
     return (
-      <section className="grid gap-5 rounded border border-border bg-surface p-6 text-center">
-        <div className="grid gap-1">
-          <span className="text-label text-text-subtle">Sitzung abgeschlossen</span>
+      <section className="grid gap-6 rounded border border-border bg-surface p-6">
+        <div className="grid gap-1 text-center">
+          <span className="text-label text-text-subtle">
+            {isExam ? "Prüfung abgeschlossen" : "Sitzung abgeschlossen"}
+          </span>
           <strong className="text-h1 font-semibold text-accent">{accuracy}%</strong>
           <p className="m-0 text-body-sm text-text-muted">
             {correct} von {answered} bewertet richtig · {total} Fragen insgesamt
+            {isExam && Number.isFinite(elapsed) ? ` · ${formatElapsed(elapsed)}` : ""}
           </p>
         </div>
+
+        {breakdown.length > 1 ? (
+          <div className="grid gap-1">
+            <strong className="text-body-sm font-medium text-text-muted">
+              Nach Fach
+            </strong>
+            <div className="divide-y divide-border border-y border-border">
+              {breakdown.map(([subject, stats]) => {
+                const pct = stats.total
+                  ? Math.round((stats.correct / stats.total) * 100)
+                  : 0;
+                return (
+                  <div
+                    className="flex items-center justify-between gap-3 py-2 text-body-sm"
+                    key={subject}
+                  >
+                    <span className="min-w-0 truncate text-text">{subject}</span>
+                    <span className="shrink-0 tabular-nums text-text-muted">
+                      {stats.correct}/{stats.total} · {pct}%
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap justify-center gap-3">
           <Button onClick={() => setStudyFinished(false)} variant="secondary">
             <ChevronLeft size={18} aria-hidden="true" />
@@ -2584,26 +2814,19 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               </div>
             ) : null}
 
-            {storedAnswer ? (
-              <div aria-label="Selbsteinschätzung" className="flex flex-wrap gap-2 pt-1">
-                {(
-                  [
-                    ["low", "Geraten"],
-                    ["medium", "Unsicher"],
-                    ["high", "Gewusst"]
-                  ] as const
-                ).map(([value, label]) => (
-                  <Button
-                    className="px-3"
-                    key={value}
-                    onClick={() => setConfidence(question.id, value)}
-                    variant={storedAnswer.confidence === value ? "secondary" : "ghost"}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-            ) : null}
+            <div className="flex justify-end pt-1">
+              <Button
+                className="px-2 text-text-subtle"
+                onClick={() => {
+                  setReportType("wrong-answer");
+                  setReportOpen(true);
+                }}
+                variant="ghost"
+              >
+                <FileWarning size={15} aria-hidden="true" />
+                <span className="text-body-sm">Frage melden</span>
+              </Button>
+            </div>
           </section>
         ) : null}
 
@@ -2742,23 +2965,18 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
               </div>
             ) : null}
 
-            <div aria-label="Selbsteinschätzung" className="flex flex-wrap gap-2 pt-1">
-              {(
-                [
-                  ["low", "Geraten"],
-                  ["medium", "Unsicher"],
-                  ["high", "Gewusst"]
-                ] as const
-              ).map(([value, label]) => (
-                <Button
-                  className="px-3"
-                  key={value}
-                  onClick={() => setConfidence(question.id, value)}
-                  variant={storedAnswer.confidence === value ? "secondary" : "ghost"}
-                >
-                  {label}
-                </Button>
-              ))}
+            <div className="flex justify-end pt-1">
+              <Button
+                className="px-2 text-text-subtle"
+                onClick={() => {
+                  setReportType("wrong-answer");
+                  setReportOpen(true);
+                }}
+                variant="ghost"
+              >
+                <FileWarning size={15} aria-hidden="true" />
+                <span className="text-body-sm">Frage melden</span>
+              </Button>
             </div>
           </section>
         )}
@@ -2977,6 +3195,14 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   }
 
   function renderSearch() {
+    if (!questionsFullReady) {
+      return (
+        <p className="m-0 text-body text-text-muted">
+          Fragenkatalog wird geladen — Suche gleich verfügbar.
+        </p>
+      );
+    }
+
     const tooShort = clean(searchQuery).length < 2;
 
     return (
@@ -3019,6 +3245,14 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   }
 
   function renderMistakes() {
+    if (!questionsFullReady) {
+      return (
+        <p className="m-0 text-body text-text-muted">
+          Fragenkatalog wird geladen.
+        </p>
+      );
+    }
+
     return (
       <div className="mx-auto grid max-w-content gap-4">
         <h2 className="m-0 text-h3 font-semibold">
@@ -3056,6 +3290,14 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   }
 
   function renderBookmarks() {
+    if (!questionsFullReady) {
+      return (
+        <p className="m-0 text-body text-text-muted">
+          Fragenkatalog wird geladen.
+        </p>
+      );
+    }
+
     const folderQuestions = (activeFolder?.questionIds || [])
       .map((questionId) => questionById.get(questionId))
       .filter((question): question is Question => Boolean(question));
@@ -3232,7 +3474,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
                             patchUser(
                               account.id,
                               { role: event.target.value },
-                              "Role updated"
+                              "Rolle aktualisiert"
                             )
                           }
                           value={account.role}
@@ -3328,6 +3570,13 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
           </div>
         </section>
 
+        {questionsFullReady ? (
+          <section className="grid gap-3">
+            <h2 className="m-0 text-h3 font-semibold">Datenqualität</h2>
+            {renderBankHygiene()}
+          </section>
+        ) : null}
+
         <section className="grid gap-3">
           <h2 className="m-0 text-h3 font-semibold">
             {openReports.length} offene{" "}
@@ -3373,28 +3622,168 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
     );
   }
 
-  function renderSegmented<T extends string>(
-    options: ReadonlyArray<readonly [T, string]>,
-    value: T,
-    onChange: (next: T) => void
-  ) {
-    return (
-      <div className="flex rounded border border-border bg-surface p-1">
-        {options.map(([optionValue, label]) => {
-          const active = value === optionValue;
+  function renderKeyboardHelp() {
+    const shortcuts: Array<[string, string]> = [
+      ["1–5", "Antwort auswählen"],
+      ["Enter / Leertaste", "Antwort abgeben"],
+      ["N / →", "Nächste Frage"],
+      ["P / ←", "Vorherige Frage"],
+      ["Q, W, E, R, T", "Antwort ausschließen"],
+      ["⌘K / Ctrl+K", "Befehlspalette"],
+      ["?", "Diese Hilfe"]
+    ];
 
-          return (
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 bg-black/40"
+          onClick={() => setHelpOpen(false)}
+        />
+        <section
+          aria-label="Tastenkürzel"
+          className="relative grid w-full max-w-md gap-4 rounded border border-border bg-surface p-6"
+        >
+          <div className="flex items-center justify-between">
+            <strong className="text-h3 font-semibold">Tastenkürzel</strong>
             <Button
-              aria-pressed={active}
-              className={cn("flex-1", active && "bg-surface-muted text-text")}
-              key={optionValue}
-              onClick={() => onChange(optionValue)}
-              variant={active ? "secondary" : "ghost"}
+              aria-label="Schließen"
+              className="px-2"
+              onClick={() => setHelpOpen(false)}
+              variant="ghost"
             >
-              {label}
+              <X size={18} aria-hidden="true" />
             </Button>
-          );
-        })}
+          </div>
+          <div className="divide-y divide-border border-y border-border">
+            {shortcuts.map(([key, label]) => (
+              <div
+                className="flex items-center justify-between gap-4 py-2.5 text-body-sm"
+                key={key}
+              >
+                <span className="text-text-muted">{label}</span>
+                <kbd className="rounded border border-border bg-surface-muted px-2 py-0.5 text-label font-medium text-text">
+                  {key}
+                </kbd>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  function renderCommandPalette() {
+    const commands: Array<{ label: string; action: () => void }> = [
+      { label: "Übersicht", action: () => setView("dashboard") },
+      { label: "Klausuren", action: () => setView("subjects") },
+      { label: "Sitzungen", action: () => setView("trainer") },
+      { label: "Suche", action: () => setView("search") },
+      { label: "Fehler", action: () => setView("mistakes") },
+      { label: "Lesezeichen", action: () => setView("bookmarks") },
+      ...(user?.role === "admin"
+        ? [{ label: "Admin", action: () => setView("admin") }]
+        : []),
+      { label: "Abmelden", action: () => void logout() }
+    ];
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-start justify-center p-6 pt-24">
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 bg-black/40"
+          onClick={() => setCommandOpen(false)}
+        />
+        <section
+          aria-label="Befehlspalette"
+          className="relative grid w-full max-w-md gap-1 rounded border border-border bg-surface p-2 shadow-popover"
+        >
+          {commands.map((command) => (
+            <button
+              className="flex items-center gap-3 rounded px-3 py-2.5 text-left text-body transition-colors hover:bg-surface-muted"
+              key={command.label}
+              onClick={() => {
+                command.action();
+                setCommandOpen(false);
+              }}
+              type="button"
+            >
+              {command.label}
+            </button>
+          ))}
+        </section>
+      </div>
+    );
+  }
+
+  function renderBankHygiene() {
+    const noExplanation: Question[] = [];
+    const noNotes: Question[] = [];
+    const duplicateStems = new Map<string, number>();
+    const seenStems = new Map<string, Question>();
+
+    for (const question of questions) {
+      if (!question.explanation && !question.notes?.length) {
+        noExplanation.push(question);
+      }
+      if (!question.notes?.length) {
+        noNotes.push(question);
+      }
+      const stemKey = question.stem.trim().toLowerCase();
+      if (stemKey.length > 20) {
+        if (seenStems.has(stemKey)) {
+          duplicateStems.set(stemKey, (duplicateStems.get(stemKey) || 1) + 1);
+        } else {
+          seenStems.set(stemKey, question);
+        }
+      }
+    }
+
+    const duplicateCount = Array.from(duplicateStems.values()).reduce(
+      (sum, count) => sum + count,
+      0
+    );
+
+    const rows: Array<{ label: string; value: number; hint: string }> = [
+      {
+        label: "Ohne Erklärung",
+        value: noExplanation.length,
+        hint: "Fragen ohne explanation oder notes"
+      },
+      {
+        label: "Ohne Notizen",
+        value: noNotes.length,
+        hint: "Fragen ohne kommentare/korrekturen"
+      },
+      {
+        label: "Duplikate",
+        value: duplicateCount,
+        hint: "Mehrfach vorkommende Fragestämme"
+      }
+    ];
+
+    return (
+      <div className="divide-y divide-border border-y border-border">
+        {rows.map((row) => (
+          <div
+            className="flex items-center justify-between gap-4 py-3"
+            key={row.label}
+          >
+            <div className="grid min-w-0 gap-0.5">
+              <span className="text-body font-medium text-text">{row.label}</span>
+              <span className="text-label text-text-subtle">{row.hint}</span>
+            </div>
+            <span
+              className={
+                row.value > 0
+                  ? "shrink-0 text-h3 font-semibold tabular-nums text-text"
+                  : "shrink-0 text-h3 font-semibold tabular-nums text-text-subtle"
+              }
+            >
+              {formatNumber(row.value)}
+            </span>
+          </div>
+        ))}
       </div>
     );
   }
@@ -3468,28 +3857,28 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
             <span className="text-body-sm font-medium text-text">Modus</span>
-            {renderSegmented(
-              [
+            <Segmented
+              onChange={setMode}
+              options={[
                 ["study", "Lernen"],
                 ["exam", "Prüfung"],
                 ["review", "Wiederholung"]
-              ] as const,
-              mode,
-              setMode
-            )}
+              ] as const}
+              value={mode}
+            />
           </div>
           <div className="grid gap-2">
             <span className="text-body-sm font-medium text-text">Auswahl</span>
-            {renderSegmented(
-              [
+            <Segmented
+              onChange={setPool}
+              options={[
                 ["all", "Alle"],
                 ["unanswered", "Neu"],
                 ["wrong", "Falsch"],
                 ["bookmarked", "Gespeichert"]
-              ] as const,
-              pool,
-              setPool
-            )}
+              ] as const}
+              value={pool}
+            />
           </div>
         </div>
 

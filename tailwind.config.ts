@@ -18,7 +18,8 @@ const config: Config = {
       "text-subtle": "var(--text-subtle)",
       accent: "var(--accent)",
       "accent-foreground": "var(--accent-foreground)",
-      danger: "var(--danger)"
+      danger: "var(--danger)",
+      highlight: "var(--highlight)"
     },
     spacing: {
       1: "4px",

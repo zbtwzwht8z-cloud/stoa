@@ -1,7 +1,7 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
 import type { ReadonlyRequestCookies } from "next/dist/server/web/spec-extension/adapters/request-cookies";
 import type { ManagedTrainerUser, TrainerUser } from "@/lib/types";
-import { readState } from "@/lib/server/store";
+import { readUsers, writeUsers } from "@/lib/server/store";
 
 export type ConfiguredUser = ManagedTrainerUser & {
   managed?: boolean;
@@ -9,6 +9,7 @@ export type ConfiguredUser = ManagedTrainerUser & {
 
 const COOKIE_NAME = "trainer_session";
 const SESSION_DAYS = 14;
+const HASH_PREFIX = "scrypt$";
 
 function secret() {
   return process.env.APP_SECRET || process.env.TRAINER_PASSWORD || "local-dev-secret";
@@ -31,6 +32,35 @@ function equal(left: string, right: string) {
   }
 
   return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+// --- Password hashing (scrypt) ---
+
+export function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(password, salt, 64).toString("hex");
+  return `${HASH_PREFIX}${salt}$${hash}`;
+}
+
+export function verifyPassword(password: string, stored: string): boolean {
+  if (stored.startsWith(HASH_PREFIX)) {
+    const withoutPrefix = stored.slice(HASH_PREFIX.length);
+    const separator = withoutPrefix.indexOf("$");
+    if (separator === -1) {
+      return false;
+    }
+    const salt = withoutPrefix.slice(0, separator);
+    const hash = withoutPrefix.slice(separator + 1);
+    const test = scryptSync(password, salt, 64).toString("hex");
+    return equal(hash, test);
+  }
+
+  // Legacy plaintext password — compare directly.
+  return equal(password, stored);
+}
+
+export function isPasswordHashed(stored: string): boolean {
+  return stored.startsWith(HASH_PREFIX);
 }
 
 export function getConfiguredUsers(): ConfiguredUser[] {
@@ -82,8 +112,7 @@ export async function getRuntimeUsers(): Promise<ConfiguredUser[]> {
     managed: false
   }));
   const configuredIds = new Set(configured.map((user) => user.id));
-  const state = await readState();
-  const managed = state.users
+  const managed = (await readUsers())
     .filter((user) => !configuredIds.has(user.id))
     .map((user) => ({
       ...user,
@@ -109,8 +138,20 @@ export async function findUser(name: string) {
 export async function verifyUser(name: string, password: string) {
   const user = await findUser(name);
 
-  if (!user || user.disabled || !equal(user.password, password)) {
+  if (!user || user.disabled || !verifyPassword(password, user.password)) {
     return null;
+  }
+
+  // Auto-upgrade legacy plaintext passwords to scrypt hashes on first login.
+  if (user.managed && !isPasswordHashed(user.password)) {
+    const hashed = hashPassword(password);
+    const managed = await readUsers();
+    const index = managed.findIndex((entry) => entry.id === user.id);
+
+    if (index !== -1) {
+      managed[index] = { ...managed[index], password: hashed };
+      await writeUsers(managed);
+    }
   }
 
   return publicUser(user);

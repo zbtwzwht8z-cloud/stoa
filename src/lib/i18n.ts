@@ -1,16 +1,7 @@
-// German-only UI text. The app ships in German exclusively; the translator
-// keeps a t() API so call sites stay unchanged, but there is only one dict.
-// Question content is already German.
+// German-only UI strings. The app ships in German exclusively; question
+// content is already German. Plain lookup, no translator factory.
 
-export type Lang = "de";
-
-export const LANGS: Lang[] = ["de"];
-
-export const LANG_STORAGE_KEY = "stoa-lang";
-
-type Dict = Record<string, string>;
-
-const de: Dict = {
+const strings = {
   "nav.dashboard": "Übersicht",
   "nav.subjects": "Klausuren",
   "nav.trainer": "Sitzungen",
@@ -59,10 +50,11 @@ const de: Dict = {
   "login.subtitle": "Privater Klausurtrainer. Zum Fortfahren anmelden.",
   "login.username": "Benutzername",
   "login.password": "Passwort"
-};
+} as const;
 
+export type TranslationKey = keyof typeof strings;
 export type Translate = (key: string) => string;
 
-export function createTranslator(_lang?: Lang): Translate {
-  return (key) => de[key] ?? key;
+export function t(key: string): string {
+  return (strings as Record<string, string>)[key] ?? key;
 }
