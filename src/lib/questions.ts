@@ -12,6 +12,14 @@ function assertQuestion(question: Question, index: number) {
     throw new Error(`${prefix} is missing stem`);
   }
 
+  if (question.kind === "freeText") {
+    if (!question.modelAnswer) {
+      throw new Error(`${prefix} is missing modelAnswer`);
+    }
+
+    return;
+  }
+
   if (!Array.isArray(question.choices) || question.choices.length < 2) {
     throw new Error(`${prefix} must have at least two choices`);
   }

@@ -98,10 +98,12 @@ List.displayName = "List";
 export function ListRow({
   action,
   detail,
+  meta,
   title
 }: {
   action?: React.ReactNode;
   detail?: string;
+  meta?: React.ReactNode;
   title: string;
 }) {
   return (
@@ -113,6 +115,11 @@ export function ListRow({
         <p className="m-0 text-body font-medium text-text">{title}</p>
         {detail ? (
           <p className="m-0 mt-1 text-body-sm text-text-muted">{detail}</p>
+        ) : null}
+        {meta ? (
+          <div className="mt-2 flex flex-wrap items-center gap-4 text-body-sm text-text-muted">
+            {meta}
+          </div>
         ) : null}
       </div>
       {action ? <div className="text-body-sm text-text-subtle">{action}</div> : null}

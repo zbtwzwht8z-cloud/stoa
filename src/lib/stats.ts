@@ -13,21 +13,31 @@ export function progressStats(progress: StoredProgress, questions: Question[]) {
   const answers = Object.entries(progress.answers || {}).filter(([id]) =>
     questionIds.has(id)
   );
-  const correct = answers.filter(([, answer]) => answer.correct).length;
-  const missed = answers.length - correct;
+  // freeText reveals have correct === undefined and are excluded from
+  // accuracy/missed (they're not graded), but still count as answered.
+  const graded = answers.filter(([, answer]) => answer.correct !== undefined);
+  const correct = graded.filter(([, answer]) => answer.correct).length;
+  const missed = graded.length - correct;
 
   return {
     answered: answers.length,
     correct,
     missed,
-    accuracy: answers.length ? percent((correct / answers.length) * 100) : 0
+    accuracy: graded.length ? percent((correct / graded.length) * 100) : 0
   };
 }
 
 export function subjectStats(progress: StoredProgress, questions: Question[]) {
   const bySubject = new Map<
     string,
-    { subject: string; total: number; answered: number; correct: number; missed: number }
+    {
+      subject: string;
+      total: number;
+      answered: number;
+      correct: number;
+      missed: number;
+      graded: number;
+    }
   >();
 
   for (const question of questions) {
@@ -38,7 +48,8 @@ export function subjectStats(progress: StoredProgress, questions: Question[]) {
         total: 0,
         answered: 0,
         correct: 0,
-        missed: 0
+        missed: 0,
+        graded: 0
       };
     const answer = progress.answers?.[question.id];
 
@@ -46,8 +57,12 @@ export function subjectStats(progress: StoredProgress, questions: Question[]) {
 
     if (answer) {
       current.answered += 1;
-      current.correct += answer.correct ? 1 : 0;
-      current.missed += answer.correct ? 0 : 1;
+
+      if (answer.correct !== undefined) {
+        current.graded += 1;
+        current.correct += answer.correct ? 1 : 0;
+        current.missed += answer.correct ? 0 : 1;
+      }
     }
 
     bySubject.set(question.subject, current);
@@ -56,7 +71,7 @@ export function subjectStats(progress: StoredProgress, questions: Question[]) {
   return Array.from(bySubject.values())
     .map((item) => ({
       ...item,
-      accuracy: item.answered ? percent((item.correct / item.answered) * 100) : 0,
+      accuracy: item.graded ? percent((item.correct / item.graded) * 100) : 0,
       completion: percent((item.answered / item.total) * 100)
     }))
     .sort((left, right) => left.subject.localeCompare(right.subject));
@@ -71,7 +86,8 @@ export function leaderboardFromProgress(
   return users
     .map((user) => {
       const answers = Object.values(progressByUser[user.id]?.answers || {});
-      const correct = answers.filter((answer) => answer.correct).length;
+      const graded = answers.filter((answer) => answer.correct !== undefined);
+      const correct = graded.filter((answer) => answer.correct).length;
       const weeklyAnswered = answers.filter(
         (answer) => new Date(answer.answeredAt).getTime() >= weekAgo
       ).length;
@@ -81,7 +97,7 @@ export function leaderboardFromProgress(
         name: user.name,
         answered: answers.length,
         correct,
-        accuracy: answers.length ? percent((correct / answers.length) * 100) : 0,
+        accuracy: graded.length ? percent((correct / graded.length) * 100) : 0,
         weeklyAnswered
       };
     })

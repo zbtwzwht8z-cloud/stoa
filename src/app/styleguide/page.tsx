@@ -18,14 +18,9 @@ import {
   Stat
 } from "@/components/ui";
 
-import "./styleguide.css";
-import styles from "./styleguide.module.css";
-
 export default function StyleguidePage() {
   return (
-    <div
-      className={`${styles.theme} min-h-screen bg-bg font-sans text-body font-normal text-text`}
-    >
+    <div className="min-h-screen bg-bg font-sans text-body font-normal text-text">
       <main className="mx-auto grid max-w-content gap-6 px-6 py-8">
         <header className="grid gap-2 border-b border-border pb-6">
           <h1 className="m-0 text-h1 font-semibold">Stoa design system</h1>
@@ -97,6 +92,12 @@ export default function StyleguidePage() {
               <ListRow
                 action="Not started"
                 detail="Question details appear after import"
+                meta={
+                  <>
+                    <span>Questions —</span>
+                    <span>Latest score —</span>
+                  </>
+                }
                 title="Question set"
               />
               <ListRow

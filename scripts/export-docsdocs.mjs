@@ -142,22 +142,58 @@ function toQuestion(record, chunk, subject) {
     (value, index, values) => value && values.indexOf(value) === index
   );
 
-  if (!record.uuid || !record.text || choices.length < 2 || correctIndex === -1) {
+  if (!record.uuid || !record.text) {
     return null;
   }
 
-  return {
+  const base = {
     id: record.uuid,
     subject: subject.name,
     topic,
     source: examRecord?.name ? `${subject.name} / ${examRecord.name}` : subject.name,
     stem: stripHtml(record.text),
     imageUrl: imageUrl(record.uuid, record.imageurl),
-    choices,
-    answer: choices[correctIndex].id,
     explanation: record.comment ? stripHtml(record.comment) : undefined,
     notes,
     tags
+  };
+
+  // Free-text/essay question: the site stores these as a single answer record
+  // (marked correct) holding the written model answer, not a multiple-choice
+  // option. No A-E choices exist, so render them as stem + reveal-answer.
+  if (answerRecords.length === 1 && Number(answerRecords[0].correct) === 1) {
+    return {
+      ...base,
+      kind: "freeText",
+      choices: [],
+      answer: "",
+      modelAnswer: stripHtml(answerRecords[0].text)
+    };
+  }
+
+  if (choices.length < 2 || correctIndex === -1) {
+    return null;
+  }
+
+  const answeredCount = Number(chunk.questionstats?.[record.uuid] || 0);
+  const choiceStats = answerRecords.map((answer, index) => ({
+    id: answerLabel(index),
+    count: Number(chunk.answerstats?.[answer.uuid] || 0)
+  }));
+  const correctCount = Number(
+    chunk.answerstats?.[answerRecords[correctIndex].uuid] || 0
+  );
+  const stats =
+    answeredCount > 0
+      ? { answered: answeredCount, correct: correctCount, choices: choiceStats }
+      : undefined;
+
+  return {
+    ...base,
+    kind: "mcq",
+    choices,
+    answer: choices[correctIndex].id,
+    stats
   };
 }
 
@@ -210,7 +246,9 @@ async function subjectSelections(subject, expectedCount) {
     ];
   }
 
-  const selections = (details.exams || [])
+  // Primary split: by exam (each <=500). This is the original, known-good path
+  // and captures every exam-attached question.
+  const examSelections = (details.exams || [])
     .map((exam) => ({
       label: `${subject.name} / ${exam.name}`,
       expectedCount: Number(details.examnumquestions?.[exam.uuid] || 0),
@@ -219,25 +257,38 @@ async function subjectSelections(subject, expectedCount) {
       includenulltopic
     }))
     .filter((selection) => selection.expectedCount > 0);
-  const selectedCount = selections.reduce(
-    (sum, selection) => sum + selection.expectedCount,
-    0
-  );
-  const largest = selections.reduce(
-    (max, selection) => Math.max(max, selection.expectedCount),
-    0
-  );
 
-  if (!selections.length || largest > 500) {
-    throw new Error(
-      `${subject.name}: cannot split into <=500-question exam selections`
-    );
-  }
+  // Exam selections miss questions filed under a topic with no exam. Add a
+  // selection per topic plus a topicless sweep (only when small enough to stay
+  // under the cap). Results are de-duped by the caller, so these strictly ADD to
+  // the exam selections and can never reduce coverage below the original.
+  const topicSelections = topicIds.map((topicUuid, index) => ({
+    label: `${subject.name} / topic ${index + 1}/${topicIds.length}`,
+    exams: [],
+    topics: [topicUuid],
+    includenulltopic: false
+  }));
 
-  if (selectedCount !== expectedCount) {
-    console.warn(
-      `${subject.name}: exam selections list ${selectedCount}, subject lists ${expectedCount}`
-    );
+  const topiclessSelections =
+    subjectTopiclessCount > 0 && subjectTopiclessCount <= 500
+      ? [
+          {
+            label: `${subject.name} / no topic`,
+            exams: [],
+            topics: [],
+            includenulltopic: true
+          }
+        ]
+      : [];
+
+  const selections = [
+    ...examSelections,
+    ...topicSelections,
+    ...topiclessSelections
+  ];
+
+  if (!selections.length) {
+    throw new Error(`${subject.name}: no exam or topic selections available`);
   }
 
   await sleep(REQUEST_DELAY_MS);
@@ -245,7 +296,7 @@ async function subjectSelections(subject, expectedCount) {
 }
 
 async function exportSelection(subject, selection) {
-  console.log(`  Selection: ${selection.label} (${selection.expectedCount})`);
+  console.log(`  Selection: ${selection.label} (${selection.expectedCount ?? "?"})`);
 
   const trainingUuid = await createSubjectTraining(subject, selection);
   await sleep(REQUEST_DELAY_MS);
@@ -273,13 +324,25 @@ async function exportSubject(subject, expectedCount) {
   console.log(`Subject: ${subject.name} (${expectedCount})`);
 
   const selections = await subjectSelections(subject, expectedCount);
-  const questions = [];
+  const collected = new Map();
 
   for (const selection of selections) {
-    questions.push(...(await exportSelection(subject, selection)));
+    try {
+      for (const question of await exportSelection(subject, selection)) {
+        collected.set(question.id, question);
+      }
+    } catch (error) {
+      console.warn(`  Selection failed (${selection.label}): ${error.message}`);
+    }
   }
 
-  return questions;
+  if (collected.size < expectedCount) {
+    console.warn(
+      `  ${subject.name}: collected ${collected.size}, site lists ${expectedCount}`
+    );
+  }
+
+  return [...collected.values()];
 }
 
 console.log("Logging in");
