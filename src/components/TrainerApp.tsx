@@ -44,6 +44,7 @@ import {
   Input,
   List,
   ListRow,
+  Logo,
   Segmented,
   Select,
   Stat,
@@ -148,7 +149,7 @@ function formatPercent(value: number) {
 }
 
 function formatNumber(value: number) {
-  return new Intl.NumberFormat("en-US").format(value);
+  return new Intl.NumberFormat("de-DE").format(value);
 }
 
 function formatElapsed(ms: number) {
@@ -1833,12 +1834,12 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
   const sidebarContent = (
     <>
       <div className="flex items-center justify-between border-b border-border pb-4">
-        <div className="flex items-center gap-2">
-          <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full bg-accent" />
+        <div className="flex items-center gap-2.5">
+          <Logo size={26} />
           <strong className="text-h3 font-semibold">Stoa</strong>
         </div>
         <Button
-          aria-label="Close navigation"
+          aria-label="Navigation schließen"
           className="px-2 md:hidden"
           onClick={() => setNavOpen(false)}
           variant="ghost"
@@ -1847,7 +1848,7 @@ export default function TrainerApp({ questionMetrics }: TrainerAppProps) {
         </Button>
       </div>
 
-      <nav aria-label="Main navigation" className="grid gap-1">
+      <nav aria-label="Hauptnavigation" className="grid gap-1">
         {navItems
           .filter((item) => !item.admin || user.role === "admin")
           .map((item) => {

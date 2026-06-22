@@ -1,7 +1,7 @@
 "use client";
 
 import { LockKeyhole } from "lucide-react";
-import { Button, Field, Input } from "@/components/ui";
+import { Button, Field, Input, Logo } from "@/components/ui";
 import type { Translate } from "@/lib/i18n";
 import type { QuestionMetrics } from "@/lib/types";
 
@@ -36,8 +36,8 @@ export default function StoaLanding({
     <main className="flex min-h-[100dvh] items-center justify-center bg-bg px-6 py-12 font-sans text-body text-text">
       <div className="w-full max-w-sm">
         <div className="mb-8 grid gap-1">
-          <div className="flex items-center gap-2">
-            <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full bg-accent" />
+          <div className="flex items-center gap-2.5">
+            <Logo size={32} />
             <strong className="text-h2 font-semibold">Stoa</strong>
           </div>
           <p className="m-0 text-body-sm text-text-muted">{t("login.subtitle")}</p>
