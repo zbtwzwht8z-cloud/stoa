@@ -11,6 +11,20 @@ const COOKIE_NAME = "trainer_session";
 const SESSION_DAYS = 14;
 const HASH_PREFIX = "scrypt$";
 
+// Hard ban list (compared case-insensitively against id and name). Banned
+// accounts are filtered out of the runtime user list, so they cannot log in,
+// don't show up in the admin panel, and any existing session is invalidated —
+// regardless of whether they come from TRAINER_USERS or the KV store. Remove an
+// entry here to lift the ban.
+const BANNED_LOGINS = new Set(["alaaaala"]);
+
+function isBanned(user: { id: string; name: string }) {
+  return (
+    BANNED_LOGINS.has(user.id.trim().toLowerCase()) ||
+    BANNED_LOGINS.has(user.name.trim().toLowerCase())
+  );
+}
+
 function secret() {
   return process.env.APP_SECRET || process.env.TRAINER_PASSWORD || "local-dev-secret";
 }
@@ -119,7 +133,7 @@ export async function getRuntimeUsers(): Promise<ConfiguredUser[]> {
       managed: true
     }));
 
-  return [...configured, ...managed];
+  return [...configured, ...managed].filter((user) => !isBanned(user));
 }
 
 export async function publicUsers() {
